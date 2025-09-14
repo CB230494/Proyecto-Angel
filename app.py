@@ -1,10 +1,10 @@
 # =========================
 # 📊 MPGP – Proyecto INTEGRADO (todo en un diagrama)
 # =========================
-# Contiene:
-# 1) Diagrama principal (ramas Sí/No, sin cruces, rótulos externos).
-# 2) Subproceso Nodos Demandantes (Proc. 1.4, parte 1) integrado desde SÍ-1 → vuelve a SÍ-3.
-# 3) Subproceso Conducta Delictiva Reiterada (3 swimlanes) integrado desde SÍ-6 → vuelve a SÍ-7.
+# Principal + Nodos Demandantes (Proc. 1.4 parte 1) + Conducta Delictiva Reiterada (3 carriles)
+# Conexiones:
+#   SÍ-1 → Nodos → SÍ-3
+#   SÍ-6 → Reiterada → SÍ-7
 # Exporta PNG / PDF / PPTX.
 # =========================
 
@@ -25,9 +25,9 @@ LANE_BG=(234,240,249)
 WHITE=(255,255,255); BLACK=(0,0,0); BG=(247,250,255)
 
 W=2000
-BASE_H=1400                  # alto base del principal
-H_NODOS=760                  # alto aprox subproceso nodos
-H_REIT =920                  # alto aprox subproceso reiterada
+BASE_H=1400
+H_NODOS=760
+H_REIT =920
 SAFE=16
 ARROW_HEAD=18
 HEAD_CLEAR=SAFE+ARROW_HEAD+6
@@ -116,8 +116,13 @@ rb1 = st.text_area("B-Inferior 1","Incluye las fichas como documentación para l
 anx_wB = st.slider("Ancho de cajas Reiterada (px)", 360, 520, 420, 10)
 anx_gapB = st.slider("Separación horizontal Reiterada (px)", 40, 120, 70, 5)
 
-# ---------- Utilidades de dibujo ----------
-def wrap_text(d, text, font, max_w):
+# ---------- Utilidades de dibujo (ROBUSTECIDAS) ----------
+def _as_text(x) -> str:
+    """Devuelve siempre un string ('' si x es None)."""
+    return "" if x is None else str(x)
+
+def wrap_text(d: ImageDraw.ImageDraw, text, font: ImageFont.FreeTypeFont, max_w: int) -> List[str]:
+    text = _as_text(text)
     out=[]
     for raw in text.split("\n"):
         words=raw.split(" "); line=""
@@ -129,11 +134,13 @@ def wrap_text(d, text, font, max_w):
         if line: out.append(line)
     return out
 
-def draw_centered(d, text, box, font=FONT, fill=BLACK, leading=6):
+def draw_centered(d: ImageDraw.ImageDraw, text, box, font=FONT, fill=BLACK, leading=6):
+    text = _as_text(text)
     x0,y0,x1,y1=box; max_w=x1-x0-30
     lines=wrap_text(d,text,font,max_w); lh=font.size+leading; total=len(lines)*lh
     y=y0+(y1-y0-total)//2
     for ln in lines:
+        ln=_as_text(ln)
         w=d.textlength(ln,font=font); x=x0+(x1-x0-w)//2
         d.text((x,y),ln,font=font,fill=fill); y+=lh
 
@@ -143,22 +150,23 @@ def diamond(d, box, fill=LIGHTYELLOW, outline=BLUE, width=3):
     x0,y0,x1,y1=box; cx=(x0+x1)//2; cy=(y0+y1)//2
     d.polygon([(cx,y0),(x1,cy),(cx,y1),(x0,cy)], fill=fill, outline=outline)
 
-def arrow(d, p1, p2, color=BLUE, width=4):
+def arrow(d: ImageDraw.ImageDraw, p1: Tuple[int,int], p2: Tuple[int,int], color=BLUE, width=4):
     d.line([p1,p2], fill=color, width=width)
     ang=math.atan2(p2[1]-p1[1], p2[0]-p1[0])
     a1=(p2[0]-ARROW_HEAD*math.cos(ang-0.4), p2[1]-ARROW_HEAD*math.sin(ang-0.4))
     a2=(p2[0]-ARROW_HEAD*math.cos(ang+0.4), p2[1]-ARROW_HEAD*math.sin(ang+0.4))
     d.polygon([p2,a1,a2], fill=color)
 
-def arrow_down(d, p1, p2, **kw):
+def arrow_down(d: ImageDraw.ImageDraw, p1: Tuple[int,int], p2: Tuple[int,int], **kw):
     if p2[1] < p1[1]: p1, p2 = p2, p1
     arrow(d, p1, p2, **kw)
 
-def poly_arrow(d, pts, color=BLUE, width=4):
+def poly_arrow(d: ImageDraw.ImageDraw, pts, color=BLUE, width=4):
     for i in range(len(pts)-2): d.line([pts[i], pts[i+1]], fill=color, width=width)
     arrow(d, pts[-2], pts[-1], color=color, width=width)
 
-def paste_vertical_label(img, box, text, bg=LANE_BG, fg=BLUE):
+def paste_vertical_label(img: PILImage.Image, box: Tuple[int,int,int,int], text: str, bg=LANE_BG, fg=BLUE):
+    text=_as_text(text)
     x0,y0,x1,y1 = box
     draw = ImageDraw.Draw(img)
     draw.rectangle(box, fill=bg, outline=BORDER, width=2)
@@ -229,7 +237,7 @@ def render_png() -> bytes:
     for i,(t,y) in enumerate(zip(textos,Ys)):
         r=big(rx,int(y),widths,heights[i]); rrect(d,r); draw_centered(d,t,r); rs.append(r)
 
-    # ----- Rama NO alineada con SÍ(1..3)
+    # ----- Rama NO (alineada con SÍ 1-3)
     lx=cx-620; rn=[]
     for i,t in enumerate([n1,n2,n3]):
         r=big(lx,int(Ys[i]),widths,int(altura_si)); rrect(d,r); draw_centered(d,t,r); rn.append(r)
@@ -266,14 +274,13 @@ def render_png() -> bytes:
     poly_arrow(d,[start,mid1,mid2,end])
     d.text((min(W-50,rail_x-10),(start[1]+mid2[1])//2),"Retroalimentación", font=FONT_SMALL, fill=BLUE, anchor="rm")
 
-    # ===== SUBPROCESO A: Nodos (integrado entre SÍ-1 → SÍ-3) =====
+    # ===== Subproceso A: Nodos (SÍ-1 → … → SÍ-3) =====
     topA = r_fin[3] + 110
     d.text((W//2, topA-40), "Focalización por Nodos Demandantes (Proc. 1.4 – parte 1)",
            font=FONT_SUB, fill=BLUE, anchor="mm")
     bwA, gapA = int(anx_wA), int(anx_gapA); bhA = 92
     leftA, rightA = 80, W-80
 
-    # fila superior (4 cajas)
     totA = 4*bwA + 3*gapA
     sxA = leftA + max(0,(rightA-leftA-totA)//2)
     yA_sup = topA + 120
@@ -285,11 +292,9 @@ def render_png() -> bytes:
     for i in range(3):
         arrow(d,(a_sup[i][2]+SAFE,yA_sup),(a_sup[i+1][0]-SAFE,yA_sup))
 
-    # riel superior (como tu imagen)
     y_railA = yA_sup - bhA//2 - 40
     poly_arrow(d,[(a_sup[0][0], y_railA),(a_sup[3][2], y_railA),(a_sup[3][2], yA_sup-bhA//2-6)], color=BLUE)
 
-    # fila inferior (6 cajas)
     a_inf_txts=[a_inf1,a_inf2,a_inf3,a_inf4,a_inf5,a_inf6]
     totA2 = 6*bwA + 5*gapA
     sxA2 = leftA + max(0,(rightA-leftA-totA2)//2)
@@ -301,27 +306,22 @@ def render_png() -> bytes:
         rrect(d,r); draw_centered(d,txt,r); a_inf.append(r)
     for i in range(5):
         arrow(d,(a_inf[i][2]+SAFE,yA_inf),(a_inf[i+1][0]-SAFE,yA_inf))
-    # verticales ejemplo
     arrow_down(d, ((a_sup[1][0]+a_sup[1][2])//2, a_sup[1][3]+SAFE), ((a_inf[0][0]+a_inf[0][2])//2, a_inf[0][1]-SAFE))
     arrow_down(d, ((a_sup[2][0]+a_sup[2][2])//2, a_sup[2][3]+SAFE), ((a_inf[2][0]+a_inf[2][2])//2, a_inf[2][1]-SAFE))
 
-    # >>> Conectores de integración:
-    # SÍ-1 → primer bloque superior de Nodos
+    # Conexiones de integración (SÍ-1 → Nodos → SÍ-3)
     start_si1=(rs[0][2]+SAFE, (rs[0][1]+rs[0][3])//2)
     targ_a1=(a_sup[0][0]-SAFE, yA_sup)
-    poly_arrow(d,[start_si1,(start_si1[0]+60,start_si1[1]),(start_si1[0]+60,yA_sup),
-                  targ_a1], color=BLUE)
-    # último bloque inferior de Nodos → SÍ-3 (Planificación de programas)
+    poly_arrow(d,[start_si1,(start_si1[0]+60,start_si1[1]),(start_si1[0]+60,yA_sup),targ_a1], color=BLUE)
     end_a_last=(a_inf[-1][2]+SAFE, yA_inf)
     targ_s3=(rs[2][0]-SAFE, (rs[2][1]+rs[2][3])//2)
     poly_arrow(d,[end_a_last,(end_a_last[0]+60,yA_inf),(end_a_last[0]+60,targ_s3[1]),targ_s3], color=BLUE)
 
-    # ===== SUBPROCESO B: Reiterada (integrado SÍ-6 → SÍ-7) =====
+    # ===== Subproceso B: Reiterada (SÍ-6 → … → SÍ-7) =====
     topB = yA_inf + bhA//2 + 120
     d.text((W//2, topB-40), "Conducta delictiva reiterada", font=FONT_SUB, fill=BLUE, anchor="mm")
     lane_h, lane_gap, lane_w = 220, 24, 42
     lane_left, lane_right = 60, W-40
-
     for i,title in enumerate([lane1,lane2,lane3]):
         y0 = topB + i*(lane_h + lane_gap)
         y1 = y0 + lane_h
@@ -330,8 +330,6 @@ def render_png() -> bytes:
 
     bwB, gapB, bhB = int(anx_wB), int(anx_gapB), 92
     leftB = lane_left + lane_w + 24; rightB = lane_right - 24
-
-    # superior: 4 cajas + FIN
     totalB = 4*bwB + 3*gapB
     sxB = leftB + max(0,(rightB-leftB-totalB)//2)
     yB_sup = topB + lane_h//2
@@ -348,7 +346,6 @@ def render_png() -> bytes:
     oval(d, fin_box); draw_centered(d,"FIN", fin_box)
     arrow(d, ((supB[-1][2]+SAFE), yB_sup), (fin_box[0]-SAFE, yB_sup))
 
-    # medio: 2 cajas
     yB_mid = topB + lane_h + lane_gap + lane_h//2
     mid_x1 = sxB + bwB//2 + (bwB+gapB)*0.5
     mid_x2 = mid_x1 + bwB + gapB*1.2
@@ -357,11 +354,10 @@ def render_png() -> bytes:
     rrect(d,mid1); draw_centered(d,rm1,mid1)
     rrect(d,mid2); draw_centered(d,rm2,mid2)
     arrow(d,(mid1[2]+SAFE,yB_mid),(mid2[0]-SAFE,yB_mid))
-    # enlaces verticales
     arrow_down(d, ((supB[2][0]+supB[2][2])//2, supB[2][3]+SAFE), ((mid1[0]+mid1[2])//2, mid1[1]-SAFE))
     arrow(d, ((mid2[0]+mid2[2])//2, mid2[1]-SAFE-20), ((supB[3][0]+supB[3][2])//2, supB[3][1]-SAFE-20))
     arrow(d, ((supB[3][0]+supB[3][2])//2, supB[3][1]-SAFE-20), ((supB[3][0]+supB[3][2])//2, supB[3][1]-SAFE))
-    # inferior: 1 caja
+
     yB_inf = topB + 2*(lane_h + lane_gap) + lane_h//2
     inf_x = sxB + (bwB+gapB)*1.2
     inf=[int(inf_x-bwB//2), yB_inf-bhB//2, int(inf_x+bwB//2), yB_inf+bhB//2]
@@ -370,12 +366,10 @@ def render_png() -> bytes:
     arrow(d, ((inf[0]+inf[2])//2, inf[1]-SAFE-20), ((mid2[0]+mid2[2])//2, mid2[3]+SAFE+20))
     arrow_down(d, ((mid2[0]+mid2[2])//2, mid2[3]+SAFE+20), ((mid2[0]+mid2[2])//2, mid2[3]+SAFE+22))
 
-    # >>> Conectores de integración:
-    # SÍ-6 → primer bloque superior Reiterada
+    # Conexiones de integración (SÍ-6 → Reiterada → SÍ-7)
     start_s6=(rs[5][2]+SAFE, (rs[5][1]+rs[5][3])//2)
     targ_b1=(supB[0][0]-SAFE, yB_sup)
     poly_arrow(d,[start_s6,(start_s6[0]+60,start_s6[1]),(start_s6[0]+60,yB_sup),targ_b1], color=BLUE)
-    # FIN del carril superior → SÍ-7
     from_fin = (fin_box[2]+SAFE, yB_sup)
     targ_s7  = (rs[6][0]-SAFE, (rs[6][1]+rs[6][3])//2)
     poly_arrow(d,[from_fin,(from_fin[0]+60,yB_sup),(from_fin[0]+60,targ_s7[1]),targ_s7], color=BLUE)
