@@ -1,212 +1,241 @@
 # ===========================================
-# MPGP – Lienzo PREARMADO y EDITABLE (Streamlit)
-# - Diagrama integrado (principal + Sí/No + Nodos + Reiterada)
-# - Mover / borrar / redimensionar / agregar símbolos
-# - Exportar PNG y guardar/cargar JSON
+# MPGP – Generador de diagrama (ordenado/resumido)
+# Exporta: PNG / PDF / PPTX
 # ===========================================
-import io, json, sys, subprocess
-from typing import Any, Dict, List
+import io, math, sys, subprocess
+from typing import List, Tuple
 import streamlit as st
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
-# --- Autoinstalar el lienzo si falta ---
+# Autoinstala python-pptx si no está
 try:
-    from streamlit_drawable_canvas import st_canvas
+    from pptx import Presentation
+    from pptx.util import Inches
 except ModuleNotFoundError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "streamlit-drawable-canvas==0.9.3"])
-    from streamlit_drawable_canvas import st_canvas
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "python-pptx==0.6.23"])
+    from pptx import Presentation
+    from pptx.util import Inches
 
-# ---------- helpers de FabricJS ----------
-def shape_rect(w:int,h:int,stroke="#1f4e79",fill="#ffffff",radius=22)->Dict[str,Any]:
-    return {"type":"rect","left":-w//2,"top":-h//2,"width":w,"height":h,"rx":radius,"ry":radius,
-            "fill":fill,"stroke":stroke,"strokeWidth":3}
-def shape_oval(w:int,h:int,stroke="#1f4e79",fill="#dcebf7")->Dict[str,Any]:
-    return {"type":"ellipse","left":-w//2,"top":-h//2,"rx":w//2,"ry":h//2,
-            "fill":fill,"stroke":stroke,"strokeWidth":3}
-def shape_diamond(w:int,h:int,stroke="#1f4e79",fill="#fff8e1")->Dict[str,Any]:
-    return {"type":"polygon","left":-w//2,"top":-h//2,
-            "points":[{"x":0,"y":-h//2},{"x":w//2,"y":0},{"x":0,"y":h//2},{"x":-w//2,"y":0}],
-            "fill":fill,"stroke":stroke,"strokeWidth":3}
+# ---------------- Estilos / colores ----------------
+W, H = 2200, 3000            # lienzo grande (imprimible)
+BG = (247, 250, 255)
+BLUE=(31,78,121); BORDER=(155,187,217)
+LIGHTBLUE=(220,235,247); LIGHTY=(255,248,225)
+WHITE=(255,255,255); BLACK=(20,20,20)
+SAFE=16; ARH=18; HEAD=SAFE+ARH+6
 
-def group(shape:Dict[str,Any], text:str, x:int, y:int, w:int, h:int, font=18)->Dict[str,Any]:
-    tb = {"type":"textbox","left":12,"top":-h//2+12,"width":max(60,w-24),
-          "text":text, "fontSize":font, "fill":"#202020",
-          "textAlign":"center","fontFamily":"DejaVu Sans, Arial","editable":True}
-    return {"type":"group","left":x,"top":y,"originX":"center","originY":"center",
-            "objects":[shape,tb],"selectable":True}
+def font(sz:int):
+    try: return ImageFont.truetype("DejaVuSans.ttf", sz)
+    except: return ImageFont.load_default()
+F_TITLE=font(40); F=font(26); FS=font(22)
 
-def add(tipo:str, texto:str, x:int, y:int, w:int, h:int)->Dict[str,Any]:
-    if tipo=="oval":    return group(shape_oval(w,h), texto, x,y,w,h,18)
-    if tipo=="rect":    return group(shape_rect(w,h), texto, x,y,w,h,18)
-    if tipo=="diamond": return group(shape_diamond(w,h), texto, x,y,w,h,18)
-    # fallback
-    return group(shape_rect(w,h), texto, x,y,w,h,18)
+# ---------------- Utilidades de dibujo ----------------
+def sx(x)->str: return "" if x is None else str(x)
 
-def line(x1,y1,x2,y2,color="#1f4e79",w=3)->Dict[str,Any]:
-    return {"type":"line","x1":x1,"y1":y1,"x2":x2,"y2":y2,"stroke":color,"strokeWidth":w,"selectable":True}
+def wrap(d:ImageDraw.ImageDraw, text:str, font, max_w:int)->List[str]:
+    text=sx(text); out=[]
+    for raw in text.split("\n"):
+        words=raw.split(" "); cur=""
+        for w in words:
+            t=(cur+" "+w).strip()
+            if d.textlength(t, font=font) <= max_w: cur=t
+            else:
+                if cur: out.append(cur)
+                cur=w
+        out.append(cur)
+    return out
 
-# ---------- plantilla PREARMADA (ordenada y resumida) ----------
-def plantilla_base(W=2000,H=1600)->Dict[str,Any]:
-    objs:List[Dict[str,Any]]=[]
-    cx=W//2; x_no=420; x_si=W-420
-    step=140; bw=520; bh=92
+def h_for_text(d, text, font, max_w, pad_v=18, leading=6, min_h=78):
+    lines=wrap(d, text, font, max_w); lh=font.size+leading
+    return max(min_h, pad_v*2 + lh*max(1,len(lines)))
 
-    # Centro
-    y=180
-    objs.append(add("oval","INICIO\nPlanificación preventiva anual",cx,y-60,520,84))
-    objs.append(add("rect","Definición y calendarización de Delegaciones\n(Proc. 1.1)",cx,y+80,bw,bh))
-    objs.append(add("rect","Apreciación situacional del territorio\n(Proc. 1.2)",cx,y+80+step,bw,bh))
-    objs.append(add("rect","Identificación de factores de riesgo y delitos\n(DATAPOL, estadísticas, patrullaje)",cx,y+80+2*step,bw,bh))
-    objs.append(add("diamond","¿Se identifican riesgos prioritarios?",cx,y+80+3*step,560,120))
-    objs.append(add("oval","FIN\nEvaluación global de resultados\n(Indicadores, metas, impacto – 3.3)",cx,y+80+3*step+420,560,100))
+def draw_center(d, text, box, font=F, fill=BLACK, leading=6, pad=18):
+    x0,y0,x1,y1=box; max_w=x1-x0-2*pad
+    lines=wrap(d, text, font, max_w); lh=font.size+leading
+    total=lh*max(1,len(lines)); y=y0+(y1-y0-total)//2
+    for ln in lines:
+        w=d.textlength(ln, font=font)
+        d.text((x0+(x1-x0-w)//2, y), ln, font=font, fill=fill); y+=lh
 
-    # NO (izquierda)
-    objs.append(add("rect","Patrullaje rutinario y vigilancia continua",x_no,260,bw,bh))
-    objs.append(add("rect","Registro de factores menores en RAP",x_no,260+step,bw,bh))
-    objs.append(add("rect","Integración al análisis situacional",x_no,260+2*step,bw,bh))
+def rrect(d, box, r=24, fill=WHITE, outline=BLUE, w=3): d.rounded_rectangle(box, radius=r, fill=fill, outline=outline, width=w)
+def oval(d, box, fill=LIGHTBLUE, outline=BLUE, w=3): d.ellipse(box, fill=fill, outline=outline, width=w)
+def diamond(d, box, fill=LIGHTY, outline=BLUE, w=3):
+    x0,y0,x1,y1=box; cx=(x0+x1)//2; cy=(y0+y1)//2
+    d.polygon([(cx,y0),(x1,cy),(cx,y1),(x0,cy)], fill=fill, outline=outline)
 
-    # SÍ (derecha)
-    si_texts=[
-        "Priorización de riesgos y delitos\n(Pareto, MIC-MAC, Triángulo de violencias)",
-        "Construcción de líneas de acción preventivas\n(Procedimiento 2.3)",
-        "Planificación de programas policiales preventivos\n(Procedimiento 2.4)",
-        "Elaboración de órdenes de servicio para operativos",
-        "Implementación en terreno\n• Patrullajes preventivos\n• Respuesta inmediata\n• Supervisión\n• Coordinación local",
-        "Reporte de operativos (RAP, DATAPOL, informes)",
-        "Evaluación de cumplimiento (Trazabilidad 3.1 y 3.2)",
-        "Retroalimentación a la planificación preventiva",
-    ]
-    y_si=240
-    for i,txt in enumerate(si_texts):
-        h = 150 if i==4 else bh
-        objs.append(add("rect",txt,x_si,y_si+i*step+(10 if i>=4 else 0),bw,h))
+def arrow(d, p1:Tuple[int,int], p2:Tuple[int,int], color=BLUE, w=4):
+    d.line([p1,p2], fill=color, width=w)
+    ang=math.atan2(p2[1]-p1[1], p2[0]-p1[0])
+    a1=(p2[0]-ARH*math.cos(ang-0.4), p2[1]-ARH*math.sin(ang-0.4))
+    a2=(p2[0]-ARH*math.cos(ang+0.4), p2[1]-ARH*math.sin(ang+0.4))
+    d.polygon([p2,a1,a2], fill=color)
 
-    # Nodos (2x3)
-    title_y = y+80+3*step+540
-    objs.append({"type":"textbox","left":W//2,"top":title_y,"originX":"center","originY":"center",
-                 "width":900,"text":"Focalización por Nodos Demandantes – Resumen (Proc. 1.4)",
-                 "fontSize":22,"fill":"#1f4e79","textAlign":"center"})
-    nx0=220; gap=80; nbw=420; nbh=100; y1=title_y+70; y2=y1+180
-    nodos=[
-        ("Convoca reunión EDO (2º nivel)", nx0, y1),
-        ("Verifica insumos mínimos (capas, encuestas, informes)", nx0+(nbw+gap), y1),
-        ("Completa Matriz de Nodos priorizados", nx0+2*(nbw+gap), y1),
-        ("Elabora órdenes de servicio (evidencia/monitoreo)", nx0, y2),
-        ("Presenta factores críticos y variaciones del mes anterior", nx0+(nbw+gap), y2),
-        ("Analiza puntos críticos y oportunidades (cualitativo)", nx0+2*(nbw+gap), y2),
-    ]
-    for t,x,yc in nodos:
-        objs.append(add("rect",t,x,yc,nbw,nbh))
+def label(d, mx,my,text):
+    w=d.textlength(text,font=FS); h=FS.size; pad=6
+    r=[mx-w/2-pad, my-h/2-pad, mx+w/2+pad, my+h/2+pad]
+    d.rounded_rectangle(r, radius=8, fill=WHITE, outline=BLUE, width=2)
+    d.text((mx,my), text, font=FS, fill=BLUE, anchor="mm")
 
-    # Reiterada (fila 5)
-    rtitle_y=y2+220
-    objs.append({"type":"textbox","left":W//2,"top":rtitle_y,"originX":"center","originY":"center",
-                 "width":700,"text":"Conducta delictiva reiterada – Resumen",
-                 "fontSize":22,"fill":"#1f4e79","textAlign":"center"})
-    rx0=160; rgap=90; rbw=420; rbh=100; ry=rtitle_y+60
-    reiter=[
-        "Estudia antecedentes judiciales del objetivo",
-        "Elabora ficha de conducta delictiva reiterada",
-        "Remite fichas a operaciones regionales",
-        "Presenta fichas en reunión EDO (primer nivel)",
-        "Documenta para EDO (primer y segundo nivel)",
-    ]
-    for i,t in enumerate(reiter):
-        objs.append(add("rect",t,rx0+i*(rbw+rgap),ry,rbw,rbh))
-
-    return {"version":"5.2.4","objects":objs}
-
-# ---------- UI ----------
-st.set_page_config(page_title="MPGP – Diagrama prearmado", layout="wide")
-st.title("MPGP – Diagrama integrado (prearmado y editable)")
-
-# Estado
-if "fabric_json" not in st.session_state:
-    st.session_state.fabric_json = plantilla_base()
-
-# Paleta para agregar símbolos
-with st.sidebar:
-    st.header("Agregar símbolo")
-    tipo_hum = st.selectbox("Tipo", ["Proceso (rect)", "Decisión (rombo)", "Inicio/Fin (óvalo)", "Texto suelto"])
-    tipo = {"Proceso (rect)":"rect","Decisión (rombo)":"diamond","Inicio/Fin (óvalo)":"oval","Texto suelto":"text"}[tipo_hum]
-    texto = st.text_area("Texto", "Nuevo proceso")
-    w = st.number_input("Ancho", 120, 900, 420, 10)
-    h = st.number_input("Alto",   40,  300, 92, 5)
-    x = st.number_input("Posición X", 50, 3000, 300, 10)
-    y = st.number_input("Posición Y", 50, 3000, 200, 10)
-    if st.button("➕ Agregar"):
-        if tipo=="text":
-            obj={"type":"textbox","left":int(x),"top":int(y),"originX":"center","originY":"center",
-                 "width":int(w),"text":texto,"fontSize":18,"fill":"#202020","textAlign":"center",
-                 "fontFamily":"DejaVu Sans, Arial","editable":True}
-        else:
-            obj=add(tipo, texto, int(x), int(y), int(w), int(h))
-        st.session_state.fabric_json["objects"].append(obj)
-
-    st.divider()
-    st.subheader("Guardar / Cargar")
-    st.download_button("⬇️ Descargar JSON", data=json.dumps(st.session_state.fabric_json, ensure_ascii=False).encode("utf-8"),
-                       file_name="mpgp_diagrama.json", mime="application/json")
-    up = st.file_uploader("Cargar JSON", type=["json"])
-    if up:
-        try:
-            st.session_state.fabric_json = json.loads(up.read().decode("utf-8"))
-            st.success("Diagrama cargado.")
-        except Exception as e:
-            st.error(f"JSON inválido: {e}")
-
-# Herramientas (ES)
-labels = {
-    "Transformar (mover/seleccionar)":"transform",
-    "Rectángulo":"rect",
-    "Círculo":"circle",
-    "Línea":"line",
-    "Flecha":"arrow",
-    "Texto":"text",
-    "Polígono":"polygon",
+# ---------------- Textos por defecto (resumidos) ----------------
+TXT = {
+"INICIO":"INICIO\nPlanificación preventiva anual",
+"B1":"Definición y calendarización de Delegaciones\n(Proc. 1.1)",
+"B2":"Apreciación situacional del territorio\n(Proc. 1.2)",
+"B3":"Identificación de factores de riesgo y delitos\n(DATAPOL, estadísticas, patrullaje)",
+"DEC":"¿Se identifican riesgos prioritarios?",
+"NO1":"Patrullaje rutinario y vigilancia continua",
+"NO2":"Registro de factores menores en RAP",
+"NO3":"Integración al análisis situacional",
+"SI1":"Priorización de riesgos y delitos\n(Pareto, MIC-MAC, Triángulo de violencias)",
+"SI2":"Construcción de líneas de acción preventivas\n(Proc. 2.3)",
+"SI3":"Planificación de programas policiales preventivos\n(Proc. 2.4)",
+"SI4":"Elaboración de órdenes de servicio para operativos",
+"SI5":"Implementación en terreno\n• Patrullajes preventivos\n• Respuesta inmediata\n• Supervisión\n• Coordinación local",
+"SI6":"Reporte de operativos (RAP, DATAPOL, informes)",
+"SI7":"Evaluación de cumplimiento (Trazabilidad 3.1 y 3.2)",
+"SI8":"Retroalimentación a la planificación preventiva",
+"FIN":"FIN\nEvaluación global de resultados\n(Indicadores, metas, impacto – 3.3)",
+# Nodos (resumen 6 pasos)
+"N1":"Convoca reunión EDO (2º nivel)",
+"N2":"Verifica insumos mínimos (capas, encuestas, informes)",
+"N3":"Completa Matriz de Nodos priorizados",
+"N4":"Elabora órdenes de servicio (evidencia/monitoreo)",
+"N5":"Presenta factores críticos y variaciones del mes anterior",
+"N6":"Analiza puntos críticos y oportunidades (cualitativo)",
+# Reiterada (resumen 5 pasos)
+"R1":"Estudia antecedentes judiciales del objetivo",
+"R2":"Elabora ficha de conducta delictiva reiterada",
+"R3":"Remite fichas a operaciones regionales",
+"R4":"Presenta fichas en reunión EDO (primer nivel)",
+"R5":"Documenta para EDO (primer y segundo nivel)",
 }
-col_canvas, col_opts = st.columns([4,1])
-with col_opts:
-    tool = st.radio("Herramienta", list(labels.keys()), index=0)
-    drawing_mode = labels[tool]
-    stroke_width = st.slider("Grosor de línea", 1, 10, 3)
-    stroke_color = st.color_picker("Color de línea", "#1f4e79")
-    fill_color   = st.color_picker("Relleno", "#ffffff")
-    bg_color     = st.color_picker("Fondo del lienzo", "#f7faff")
-    height = st.number_input("Alto del lienzo", 900, 3000, 1700, 50)
-    width  = st.number_input("Ancho del lienzo", 1200, 3200, 2000, 50)
-    st.caption("Con **Transformar** mueves/borras; con **Flecha** dibujas conectores.")
 
-with col_canvas:
-    result = st_canvas(
-        background_color=bg_color,
-        height=int(height),
-        width=int(width),
-        drawing_mode=drawing_mode,
-        stroke_width=int(stroke_width),
-        stroke_color=stroke_color,
-        fill_color=fill_color,
-        update_streamlit=True,
-        display_toolbar=True,
-        initial_drawing=st.session_state.fabric_json,
-        key="canvas_prearmado",
-    )
+# ---------------- Render del diagrama ----------------
+def render_png(txt:dict=TXT) -> bytes:
+    img=Image.new("RGB",(W,H),BG); d=ImageDraw.Draw(img)
+    d.rectangle([40,40,W-40,H-40], outline=BORDER, width=3)
+    d.text((W//2, 90), "Modelo Preventivo de Gestión Policial – Proyecto Integrado (RESUMEN)", font=F_TITLE, fill=BLUE, anchor="mm")
 
-# Persistir cambios
-if result.json_data is not None:
-    st.session_state.fabric_json = result.json_data
+    cx=W//2; x_no=430; x_si=W-430
 
-# Exportar
-st.markdown("### Exportar")
-if result.image_data is not None:
-    img = Image.fromarray(result.image_data.astype("uint8"))
-    buf_png = io.BytesIO(); img.save(buf_png, format="PNG")
-    st.download_button("⬇️ Descargar PNG", data=buf_png.getvalue(),
-                       file_name="mpgp_prearmado.png", mime="image/png")
+    # Columna central
+    y=180
+    ini=[cx-270,y-54,cx+270,y+54];  oval(d,ini); draw_center(d,txt["INICIO"],ini,F)
+    y+=150
+    b1=[cx-300,y-60,cx+300,y+60];   rrect(d,b1); draw_center(d,txt["B1"],b1)
+    d.line([(cx,y-60-20),(cx,y-60)],fill=BLUE,width=4)
+    y+=150
+    b2=[cx-300,y-60,cx+300,y+60];   rrect(d,b2); draw_center(d,txt["B2"],b2)
+    d.line([(cx,y-60-20),(cx,y-60)],fill=BLUE,width=4)
+    y+=150
+    b3=[cx-300,y-60,cx+300,y+60];   rrect(d,b3); draw_center(d,txt["B3"],b3)
+    d.line([(cx,y-60-20),(cx,y-60)],fill=BLUE,width=4)
+    y+=140
+    dec=[cx-320,y-70,cx+320,y+70];  diamond(d,dec); draw_center(d,txt["DEC"],dec)
 
-    # PDF opcional (una página)
-    buf_pdf = io.BytesIO(); img.convert("RGB").save(buf_pdf, "PDF")
-    st.download_button("⬇️ Descargar PDF", data=buf_pdf.getvalue(),
-                       file_name="mpgp_prearmado.pdf", mime="application/pdf")
-else:
-    st.info("Mueve o agrega algo para habilitar la exportación.")
+    # Rama NO (izquierda)
+    yno=(dec[1]+dec[3])//2
+    no1=[x_no-300, 260, x_no+300, 340]; rrect(d,no1); draw_center(d,txt["NO1"],no1)
+    no2=[x_no-300, 420, x_no+300, 500]; rrect(d,no2); draw_center(d,txt["NO2"],no2)
+    no3=[x_no-300, 580, x_no+300, 660]; rrect(d,no3); draw_center(d,txt["NO3"],no3)
+    arrow(d, (dec[0]-10, yno), (x_no+300+60, (no1[1]+no1[3])//2))
+    label(d, (dec[0]+x_no+300+60)/2, yno-30, "No")
+    arrow(d, ((no1[0]+no1[2])//2, no1[3]+10), ((no2[0]+no2[2])//2, no2[1]-10))
+    arrow(d, ((no2[0]+no2[2])//2, no2[3]+10), ((no3[0]+no3[2])//2, no3[1]-10))
+
+    # Rama SÍ (derecha)
+    ysi=(dec[1]+dec[3])//2
+    si_y_top=240; si_step=140
+    si=[]; si_txt=["SI1","SI2","SI3","SI4","SI5","SI6","SI7","SI8"]
+    for i,key in enumerate(si_txt):
+        hh = 150 if key=="SI5" else 92
+        yb = si_y_top + i*si_step + (10 if i>=4 else 0)
+        r=[x_si-300, yb-hh//2, x_si+300, yb+hh//2]
+        rrect(d,r); draw_center(d,txt[key],r); si.append(r)
+        if i>0: arrow(d, (((si[i-1][0]+si[i-1][2])//2, si[i-1][3]+10)),
+                        (((r[0]+r[2])//2, r[1]-10)))
+    arrow(d, (dec[2]+10, ysi), (x_si-300-60, (si[0][1]+si[0][3])//2)); label(d, (dec[2]+x_si-300-60)/2, ysi-30, "Sí")
+
+    # Retroalimentación (SI8 → B2)
+    rail_x = x_si+360
+    arrow(d, (si[-1][2]+10, (si[-1][1]+si[-1][3])//2), (rail_x, (si[-1][1]+si[-1][3])//2))
+    d.line([(rail_x, (si[-1][1]+si[-1][3])//2), (rail_x, (b2[1]+b2[3])//2)], fill=BLUE, width=4)
+    arrow(d, (rail_x, (b2[1]+b2[3])//2), (b2[2]+20, (b2[1]+b2[3])//2))
+    d.text((rail_x-8, ((si[-1][1]+si[-1][3])//2 + (b2[1]+b2[3])//2)//2),
+           "Retroalimentación", font=FS, fill=BLUE, anchor="rm")
+
+    # FIN central
+    d.line([(cx, dec[3]+10),(cx, dec[3]+10+370)],fill=BLUE,width=4)
+    fin=[cx-300, dec[3]+10+420, cx+300, dec[3]+10+520]
+    oval(d,fin); draw_center(d,txt["FIN"],fin,F)
+
+    # NODOS (2 filas x 3)
+    sec_y = dec[3]+10+560
+    d.text((W//2, sec_y), "Focalización por Nodos Demandantes – Resumen (Proc. 1.4)", font=font(32), fill=BLUE, anchor="mm")
+    y_sup = sec_y+70; x0=200; bw=420; gap=70; bh=100
+    n_keys=["N1","N2","N3","N4","N5","N6"]; n=[]
+    for i,k in enumerate(n_keys):
+        row=0 if i<3 else 1; col=i if i<3 else i-3
+        xc=x0 + col*(bw+gap); yc=y_sup + row*170
+        r=[xc, yc, xc+bw, yc+bh]; rrect(d,r); draw_center(d,txt[k],r); n.append(r)
+    arrow(d, (n[0][2]+10,(n[0][1]+n[0][3])//2), (n[1][0]-10,(n[1][1]+n[1][3])//2))
+    arrow(d, (n[1][2]+10,(n[1][1]+n[1][3])//2), (n[2][0]-10,(n[2][1]+n[2][3])//2))
+    arrow(d, (((n[0][0]+n[2][2])//2, n[2][3]+10)), (((n[3][0]+n[5][2])//2, n[3][1]-20)))
+    arrow(d, (n[3][2]+10,(n[3][1]+n[3][3])//2), (n[4][0]-10,(n[4][1]+n[4][3])//2))
+    arrow(d, (n[4][2]+10,(n[4][1]+n[4][3])//2), (n[5][0]-10,(n[5][1]+n[5][3])//2))
+    # Integración SÍ1 → Nodos → SÍ3
+    arrow(d, (si[0][2]+10, (si[0][1]+si[0][3])//2), (n[0][0]-20, (n[0][1]+n[0][3])//2))
+    arrow(d, (n[5][2]+10, (n[5][1]+n[5][3])//2), (si[2][0]-10, (si[2][1]+si[2][3])//2))
+
+    # REITERADA (fila 5)
+    sec2_y = y_sup+170*2+80
+    d.text((W//2, sec2_y), "Conducta delictiva reiterada – Resumen", font=font(32), fill=BLUE, anchor="mm")
+    y_r = sec2_y+60; bw=420; gap=90; bh=100; x0=160
+    r_keys=["R1","R2","R3","R4","R5"]; r_boxes=[]
+    for i,k in enumerate(r_keys):
+        xc=x0 + i*(bw+gap); r=[xc, y_r, xc+bw, y_r+bh]
+        rrect(d,r); draw_center(d,txt[k],r); r_boxes.append(r)
+        if i>0: arrow(d, (r_boxes[i-1][2]+10,(r_boxes[i-1][1]+r_boxes[i-1][3])//2),
+                          (r[0]-10,(r[1]+r[3])//2))
+    # Integración SÍ6 → Reiterada → SÍ7
+    arrow(d, (si[5][2]+10,(si[5][1]+si[5][3])//2),
+             (r_boxes[0][0]-10,(r_boxes[0][1]+r_boxes[0][3])//2))
+    arrow(d, (r_boxes[-1][2]+10,(r_boxes[-1][1]+r_boxes[-1][3])//2),
+             (si[6][0]-10,(si[6][1]+si[6][3])//2))
+
+    # PNG en bytes
+    buff=io.BytesIO(); img.save(buff, format="PNG")
+    return buff.getvalue()
+
+def make_pdf(png:bytes)->bytes:
+    img=Image.open(io.BytesIO(png)).convert("RGB")
+    out=io.BytesIO(); img.save(out, "PDF"); return out.getvalue()
+
+def make_pptx(png:bytes)->bytes:
+    prs=Presentation(); slide=prs.slides.add_slide(prs.slide_layouts[6])
+    slide.shapes.add_picture(io.BytesIO(png), Inches(0.3), Inches(0.3), width=Inches(10.0))
+    out=io.BytesIO(); prs.save(out); return out.getvalue()
+
+# ---------------- UI (simple y directa) ----------------
+st.set_page_config(page_title="MPGP – Generador de diagrama", layout="wide")
+st.title("MPGP – Diagrama integrado (generador)")
+st.caption("Hecho, ordenado y resumido. Descarga en PNG / PDF / PPTX.")
+
+# Botón Generar
+if st.button("🛠️ Generar/Actualizar diagrama", use_container_width=True):
+    st.session_state.png = render_png()
+if "png" not in st.session_state:
+    st.session_state.png = render_png()
+
+# Preview + descargas
+st.image(st.session_state.png, use_column_width=True)
+col1,col2,col3 = st.columns(3)
+with col1:
+    st.download_button("⬇️ PNG", st.session_state.png, "MPGP_integrado.png", "image/png", use_container_width=True)
+with col2:
+    st.download_button("⬇️ PDF", make_pdf(st.session_state.png), "MPGP_integrado.pdf", "application/pdf", use_container_width=True)
+with col3:
+    st.download_button("⬇️ PPTX", make_pptx(st.session_state.png), "MPGP_integrado.pptx",
+                       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                       use_container_width=True)
+
