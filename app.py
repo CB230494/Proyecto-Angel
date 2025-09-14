@@ -1,11 +1,11 @@
 # =========================
-# 📊 Diagrama MPGP – Exportador (Pillow, layout limpio y rótulos bien ubicados)
+# 📊 Diagrama MPGP – Exportador (Pillow, layout estable y rótulos correctos)
 # =========================
 # - PNG, PDF y PPTX
-# - Flechas con separación de seguridad
-# - Rótulos "Sí/No" pegados a la flecha (colocados con normal perpendicular)
-# - Retroalimentación por riel externo (sin cruces)
-# - SÍ 5 redimensionable (alto) + ancho de toda la rama SÍ configurable
+# - Conectores SIEMPRE hacia abajo en columna central y rama SÍ/NO
+# - Rótulos "Sí/No" pegados a la flecha (normal perpendicular) y hacia fuera
+# - Retroalimentación por riel externo, con límites al borde
+# - SÍ 5 redimensionable (alto) + ancho de la rama SÍ configurable
 # =========================
 
 import io, math
@@ -18,7 +18,7 @@ from pptx.util import Inches
 # ---------- Config / Estilos ----------
 st.set_page_config(page_title="Diagrama MPGP – Exportador", layout="wide")
 st.title("Modelo Preventivo de Gestión Policial – Función de Operacionales")
-st.caption("Flechas ordenadas, rótulos fuera y bien posicionados, retroalimentación externa y SÍ 5 ajustable.")
+st.caption("Flechas ordenadas, rótulos bien posicionados, retroalimentación externa y SÍ 5 ajustable. Exporta PNG / PDF / PPTX.")
 
 BLUE=(31,78,121); BORDER=(155,187,217); LIGHTBLUE=(220,235,247); LIGHTYELLOW=(255,248,225)
 WHITE=(255,255,255); BLACK=(0,0,0); BG=(247,250,255)
@@ -109,16 +109,28 @@ def arrow(d: ImageDraw.ImageDraw, p1: Tuple[int,int], p2: Tuple[int,int], color=
     a2=(p2[0]-ARROW_HEAD*math.cos(ang+0.4), p2[1]-ARROW_HEAD*math.sin(ang+0.4))
     d.polygon([p2,a1,a2], fill=color)
 
-def label_near_segment(d: ImageDraw.ImageDraw, p1, p2, text: str, offset: int = 30):
-    """Coloca el texto a un lado del segmento p1->p2 (usando la normal)."""
+def arrow_down(d: ImageDraw.ImageDraw, p1: Tuple[int,int], p2: Tuple[int,int], **kw):
+    """Dibuja flecha vertical asegurando que la punta quede abajo (si no, invierte)."""
+    if p2[1] < p1[1]:
+        p1, p2 = p2, p1
+    arrow(d, p1, p2, **kw)
+
+def label_near_segment_outward(
+    d: ImageDraw.ImageDraw, p1, p2, text: str, page_center_x: int, offset: int = 36
+):
+    """Coloca el rótulo pegado al segmento (normal), siempre hacia afuera del centro de la página."""
     mx, my = (p1[0]+p2[0])/2, (p1[1]+p2[1])/2
     dx, dy = p2[0]-p1[0], p2[1]-p1[1]
     L = max(1.0, math.hypot(dx, dy))
-    nx, ny = -dy/L, dx/L  # normal a la derecha
-    tx, ty = mx + nx*offset, my + ny*offset
-    # fondo blanco para legibilidad
-    w = d.textlength(text, font=FONT_SMALL); h = FONT_SMALL.size
-    pad = 6
+    nx, ny = -dy/L, dx/L  # normal
+    # Dos candidatos (izq/der del segmento)
+    cand1 = (mx + nx*offset, my + ny*offset)
+    cand2 = (mx - nx*offset, my - ny*offset)
+    # elegimos el que quede más lejos del centro vertical de la página
+    chosen = cand1 if abs(cand1[0]-page_center_x) > abs(cand2[0]-page_center_x) else cand2
+    tx, ty = chosen
+    # cajita blanca para legibilidad
+    w = d.textlength(text, font=FONT_SMALL); h = FONT_SMALL.size; pad=6
     d.rounded_rectangle([tx-w/2-pad, ty-h/2-pad, tx+w/2+pad, ty+h/2+pad],
                         radius=8, fill=WHITE, outline=None)
     d.text((tx, ty), text, font=FONT_SMALL, fill=BLUE, anchor="mm")
@@ -156,12 +168,12 @@ def render_png() -> bytes:
     def left_pt(r):  return (r[0]-HEAD_CLEAR, (r[1]+r[3])//2)
     def right_pt(r): return (r[2]+HEAD_CLEAR, (r[1]+r[3])//2)
 
-    # Flechas columna central
-    arrow(d, bot_pt(r_inicio), top_pt(r1))
-    arrow(d, bot_pt(r1),      top_pt(r2))
-    arrow(d, bot_pt(r2),      top_pt(r3))
-    arrow(d, bot_pt(r3),      top_pt(r_dec))
-    arrow(d, bot_pt(r2),      top_pt(r_fin))  # despeja el rombo
+    # Flechas columna central (siempre hacia abajo)
+    arrow_down(d, bot_pt(r_inicio), top_pt(r1))
+    arrow_down(d, bot_pt(r1),      top_pt(r2))
+    arrow_down(d, bot_pt(r2),      top_pt(r3))
+    arrow_down(d, bot_pt(r3),      top_pt(r_dec))
+    arrow_down(d, bot_pt(r2),      top_pt(r_fin))  # despeja el rombo
 
     # ---------- Rama SÍ ----------
     rx=cx+620
@@ -195,34 +207,33 @@ def render_png() -> bytes:
         r=big(lx,int(Ys[i]),widths,h_si)
         rrect(d,r); draw_centered(d,t,r); rn.append(r)
 
-    # Decisión → ramas (con rótulo pegado a la flecha por perpendicular)
-    p_dec_to_si = (right_pt(r_dec), (rs[0][0]-HEAD_CLEAR, (rs[0][1]+rs[0][3])//2))
-    p_dec_to_no = (left_pt(r_dec),  (rn[0][2]+HEAD_CLEAR, (rn[0][1]+rn[0][3])//2))
+    # Decisión → ramas (con rótulo pegado y hacia afuera)
+    seg_si = (right_pt(r_dec), (rs[0][0]-HEAD_CLEAR, (rs[0][1]+rs[0][3])//2))
+    seg_no = (left_pt(r_dec),  (rn[0][2]+HEAD_CLEAR, (rn[0][1]+rn[0][3])//2))
 
-    arrow(d, *p_dec_to_si)
-    label_near_segment(d, *p_dec_to_si, "Sí", offset=34)
+    arrow(d, *seg_si); label_near_segment_outward(d, *seg_si, "Sí", page_center_x=cx, offset=40)
+    arrow(d, *seg_no); label_near_segment_outward(d, *seg_no, "No", page_center_x=cx, offset=40)
 
-    arrow(d, *p_dec_to_no)
-    label_near_segment(d, *p_dec_to_no, "No", offset=34)
-
-    # Cadenas verticales (punta fuera de la caja destino)
+    # Cadenas verticales (punta fuera de la caja destino, siempre hacia abajo)
     for i in range(len(rs)-1):
         p1=((rs[i][0]+rs[i][2])//2, rs[i][3]+SAFE)
         p2=((rs[i+1][0]+rs[i+1][2])//2, rs[i+1][1]-HEAD_CLEAR)
-        arrow(d,p1,p2)
+        arrow_down(d,p1,p2)
     for i in range(len(rn)-1):
         p1=((rn[i][0]+rn[i][2])//2, rn[i][3]+SAFE)
         p2=((rn[i+1][0]+rn[i+1][2])//2, rn[i+1][1]-HEAD_CLEAR)
-        arrow(d,p1,p2)
+        arrow_down(d,p1,p2)
 
-    # Retroalimentación: riel externo (sin cruces)
-    rail_x = rs[-1][2] + retro_rail
+    # Retroalimentación: riel externo (sin cruces) y limitado a borde
+    rail_x = min(W-40, rs[-1][2] + retro_rail)
     start = (rs[-1][2]+SAFE, (rs[-1][1]+rs[-1][3])//2)   # sale del último SÍ
     mid1  = (rail_x, start[1])                          # hacia el riel
     mid2  = (rail_x, (r2[1]+r2[3])//2)                  # sube/baja por el riel
-    end   = (r2[2]+HEAD_CLEAR, (r2[1]+r2[3])//2)        # entra por la derecha del Bloque 2
+    end   = (r2[2]+HEAD_CLEAR, (r2[1]+r2[3])//2)        # entra por derecha al Bloque 2
     poly_arrow(d, [start, mid1, mid2, end], color=BLUE, width=4)
-    d.text((rail_x-10, (start[1]+mid2[1])//2), "Retroalimentación", font=FONT_SMALL, fill=BLUE, anchor="rm")
+    # Etiqueta cerca del riel, recortada si hace falta
+    label_x = min(W-50, rail_x-10)
+    d.text((label_x, (start[1]+mid2[1])//2), "Retroalimentación", font=FONT_SMALL, fill=BLUE, anchor="rm")
 
     # Export PNG bytes
     out=io.BytesIO(); img.save(out, format="PNG"); return out.getvalue()
