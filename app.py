@@ -1,10 +1,9 @@
 # =========================
-# 📊 Diagrama MPGP – Exportador (Pillow, layout estable + bloque SÍ compacto)
+# 📊 Diagrama MPGP – Exportador (rama SÍ ultracompacta)
 # =========================
 # - PNG, PDF y PPTX
-# - Sin cruces; rótulos "Sí/No" pegados a su flecha y hacia afuera
-# - Rama SÍ autoajustada para que SIEMPRE quepa
-# - NUEVO: "Compacidad bloque SÍ 1–5" para agrupar Prioriza → Implementación
+# - Sin cruces; rótulos "Sí/No" pegados y hacia afuera
+# - Rama SÍ autoajustada + controles de compacidad y margen vertical
 # =========================
 
 import io, math
@@ -17,14 +16,14 @@ from pptx.util import Inches
 # ---------- Config / Estilos ----------
 st.set_page_config(page_title="Diagrama MPGP – Exportador", layout="wide")
 st.title("Modelo Preventivo de Gestión Policial – Función de Operacionales")
-st.caption("Rama SÍ compactada (1–5), flechas ordenadas, rótulos bien posicionados. Exporta PNG / PDF / PPTX.")
+st.caption("Rama SÍ ultracompacta: ajusta compacidad y margen vertical. Exporta PNG / PDF / PPTX.")
 
 BLUE=(31,78,121); BORDER=(155,187,217); LIGHTBLUE=(220,235,247); LIGHTYELLOW=(255,248,225)
 WHITE=(255,255,255); BLACK=(0,0,0); BG=(247,250,255)
 W,H=2000,1400
 SAFE=16
 ARROW_HEAD=18
-HEAD_CLEAR=SAFE+ARROW_HEAD+6
+HEAD_CLEAR=SAFE+ARROW_HEAD+6  # 40px aprox p/entradas/salidas laterales
 
 def font(size:int):
     try: return ImageFont.truetype("DejaVuSans.ttf", size)
@@ -62,18 +61,24 @@ g1,g2,g3 = st.columns(3)
 with g1:
     start_offset=st.slider("Inicio rama SÍ (relativo al rombo)", -260, 120, -90, 5)
 with g2:
-    step_user=st.slider("Espaciado vertical deseado (px)", 120, 220, 150, 5)
+    step_user=st.slider("Paso objetivo (px)", 100, 220, 140, 5)
 with g3:
-    compacto=st.toggle("Modo compacto", True)
+    compacto=st.toggle("Modo compacto (alto cajas SÍ=86px)", True)
 g4,g5,g6 = st.columns(3)
 with g4:
-    altura_si5 = st.slider("Altura cuadro SÍ 5 (px)", 110, 260, 170, 5)
+    altura_si5 = st.slider("Altura cuadro SÍ 5 (px)", 110, 260, 160, 5)
 with g5:
-    ancho_si   = st.slider("Ancho cuadros rama SÍ (px)", 520, 680, 580, 10)
+    ancho_si   = st.slider("Ancho cuadros rama SÍ (px)", 520, 680, 560, 10)
 with g6:
-    retro_rail = st.slider("Separación lateral retroalimentación (px)", 120, 260, 180, 10)
-# NUEVO: compacidad para agrupar 1–5 (pares 0–1,1–2,2–3,3–4)
-comp_block = st.slider("Compacidad bloque SÍ 1–5 (0.5 = muy pegado, 1 = normal)", 0.5, 1.0, 0.70, 0.05)
+    retro_rail = st.slider("Separación lateral retroalimentación (px)", 120, 260, 170, 10)
+
+# Más compacidad
+c7,c8 = st.columns(2)
+with c7:
+    comp_block = st.slider("Compacidad bloque SÍ 1–5", 0.30, 1.00, 0.55, 0.05)
+with c8:
+    vert_margin = st.slider("Margen vertical flecha (px)", 34, 70, 48, 2)
+    # Nota: este margen reemplaza el 2*HEAD_CLEAR anterior (~80). Valores bajos = más compacto.
 
 # ---------- Utils dibujo ----------
 def wrap_text(d: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_w: int) -> List[str]:
@@ -161,7 +166,7 @@ def render_png() -> bytes:
     arrow_down(d, bot_pt(r3),      top_pt(r_dec))
     arrow_down(d, ((r_dec[0]+r_dec[2])//2, r_dec[3]+SAFE), top_pt(r_fin))
 
-    # ---------- Rama SÍ (compacta 1–5) ----------
+    # ---------- Rama SÍ (ultracompacta 1–5) ----------
     rx=cx+620
     n_items=8
     start_y=(r_dec[1]+r_dec[3])//2 + start_offset
@@ -170,46 +175,41 @@ def render_png() -> bytes:
     widths = int(ancho_si)
     heights=[h_si,h_si,h_si,h_si,h_si5,h_si,h_si,h_si]
 
-    # disponibles
+    # límites disponibles
     max_center_y = r_fin[1] - 40
     min_center_y = (r_dec[1]+r_dec[3])//2 + 10
 
-    # requerimientos mínimos por par
-    req = [(heights[i]/2 + heights[i+1]/2 + 2*HEAD_CLEAR) for i in range(n_items-1)]
+    # requerimiento mínimo por par con margen vertical configurable
+    req = [(heights[i]/2 + heights[i+1]/2 + vert_margin) for i in range(n_items-1)]
 
-    # multipliers por par (compactamos 1–5 => pares 0..3)
+    # multipliers por par (compactamos 1–5 => pares 0..3 y 3–4 incluido)
     mult=[1.0]*(n_items-1)
     for i in range(0,4):  # 0-1,1-2,2-3,3-4
         mult[i]=comp_block
 
-    # función: dado base_step, suma de pasos
-    def total_for(base_step: float) -> float:
-        return sum(max(req[i], base_step*mult[i]) for i in range(n_items-1))
-
-    # espacio disponible con start_y actual
+    # Espacio disponible con el start_y actual
     available = max_center_y - heights[-1]/2 - start_y
     min_total = sum(req)
     if available < min_total:
-        # subimos el arranque lo justo para que quepa lo mínimo
         start_y = max(min_center_y, max_center_y - heights[-1]/2 - min_total)
         available = max_center_y - heights[-1]/2 - start_y
 
-    # buscamos base_step (binaria) que quepa y respete tu slider
-    hi = step_user
-    lo = 0.0
+    # Buscar base_step máximo que cabe (binaria), acotado por tu slider
+    def total_for(bs: float) -> float:
+        return sum(max(req[i], bs*mult[i]) for i in range(n_items-1))
+
+    hi = float(step_user); lo = 0.0
     for _ in range(32):
         mid=(lo+hi)/2
         if total_for(mid) <= available: lo=mid
         else: hi=mid
     base_step = lo
 
-    # pasos finales por par
     steps = [max(req[i], base_step*mult[i]) for i in range(n_items-1)]
 
-    # construir Ys acumulando pasos
+    # Construir posiciones
     Ys=[start_y]
-    for s in steps:
-        Ys.append(Ys[-1] + s)
+    for s in steps: Ys.append(Ys[-1] + s)
 
     textos_si=[s1,s2,s3,s4,s5,s6,s7,s8]
     rs=[]
@@ -231,14 +231,14 @@ def render_png() -> bytes:
     arrow(d, *seg_si); label_near_segment_outward(d, *seg_si, "Sí", page_center_x=cx, offset=40)
     arrow(d, *seg_no); label_near_segment_outward(d, *seg_no, "No", page_center_x=cx, offset=40)
 
-    # Conexiones verticales (siempre hacia abajo)
+    # Conexiones verticales (hacia abajo)
     for i in range(len(rs)-1):
         p1=((rs[i][0]+rs[i][2])//2, rs[i][3]+SAFE)
-        p2=((rs[i+1][0]+rs[i+1][2])//2, rs[i+1][1]-HEAD_CLEAR)
+        p2=((rs[i+1][0]+rs[i+1][2])//2, rs[i+1][1]-SAFE)  # usamos SAFE arriba por compacidad
         arrow_down(d,p1,p2)
     for i in range(len(rn)-1):
         p1=((rn[i][0]+rn[i][2])//2, rn[i][3]+SAFE)
-        p2=((rn[i+1][0]+rn[i+1][2])//2, rn[i+1][1]-HEAD_CLEAR)
+        p2=((rn[i+1][0]+rn[i+1][2])//2, rn[i+1][1]-SAFE)
         arrow_down(d,p1,p2)
 
     # Retroalimentación (riel externo limitado)
