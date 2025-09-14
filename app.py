@@ -1,11 +1,10 @@
 # =========================
-# 📊 Diagrama MPGP – Exportador (Pillow, layout estable y claro)
+# 📊 Diagrama MPGP – Exportador (Pillow, layout estable + bloque SÍ compacto)
 # =========================
 # - PNG, PDF y PPTX
-# - Conectores limpios (sin cruces)
-# - Rótulos "Sí/No" pegados a su flecha y hacia afuera
+# - Sin cruces; rótulos "Sí/No" pegados a su flecha y hacia afuera
 # - Rama SÍ autoajustada para que SIEMPRE quepa
-# - SÍ 5 redimensionable (alto) + ancho de toda la rama SÍ configurable
+# - NUEVO: "Compacidad bloque SÍ 1–5" para agrupar Prioriza → Implementación
 # =========================
 
 import io, math
@@ -18,21 +17,21 @@ from pptx.util import Inches
 # ---------- Config / Estilos ----------
 st.set_page_config(page_title="Diagrama MPGP – Exportador", layout="wide")
 st.title("Modelo Preventivo de Gestión Policial – Función de Operacionales")
-st.caption("Flechas ordenadas, rótulos bien posicionados, retroalimentación externa y SÍ 5 ajustable. Exporta PNG / PDF / PPTX.")
+st.caption("Rama SÍ compactada (1–5), flechas ordenadas, rótulos bien posicionados. Exporta PNG / PDF / PPTX.")
 
 BLUE=(31,78,121); BORDER=(155,187,217); LIGHTBLUE=(220,235,247); LIGHTYELLOW=(255,248,225)
 WHITE=(255,255,255); BLACK=(0,0,0); BG=(247,250,255)
-W,H=2000,1400                 # Lienzo
-SAFE=16                       # Separación mínima flecha-borde
-ARROW_HEAD=18                 # Tamaño de la cabeza de flecha
-HEAD_CLEAR=SAFE+ARROW_HEAD+6  # Punto de entrada/salida alejado del texto
+W,H=2000,1400
+SAFE=16
+ARROW_HEAD=18
+HEAD_CLEAR=SAFE+ARROW_HEAD+6
 
 def font(size:int):
     try: return ImageFont.truetype("DejaVuSans.ttf", size)
     except: return ImageFont.load_default()
 FONT=font(22); FONT_SMALL=font(18); FONT_TITLE=font(28)
 
-# ---------- Entradas de contenido ----------
+# ---------- Contenido ----------
 cA,cB = st.columns(2)
 with cA:
     t_inicio=st.text_input("INICIO","Planificación preventiva anual")
@@ -57,7 +56,7 @@ with cC:
 with cD:
     t_fin=st.text_area("FIN","Evaluación global de resultados\n(Indicadores, metas, impacto – 3.3)")
 
-# ---------- Ajustes de layout ----------
+# ---------- Ajustes ----------
 st.markdown("### ⚙️ Ajustes de layout")
 g1,g2,g3 = st.columns(3)
 with g1:
@@ -73,8 +72,10 @@ with g5:
     ancho_si   = st.slider("Ancho cuadros rama SÍ (px)", 520, 680, 580, 10)
 with g6:
     retro_rail = st.slider("Separación lateral retroalimentación (px)", 120, 260, 180, 10)
+# NUEVO: compacidad para agrupar 1–5 (pares 0–1,1–2,2–3,3–4)
+comp_block = st.slider("Compacidad bloque SÍ 1–5 (0.5 = muy pegado, 1 = normal)", 0.5, 1.0, 0.70, 0.05)
 
-# ---------- Utilidades de dibujo ----------
+# ---------- Utils dibujo ----------
 def wrap_text(d: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_w: int) -> List[str]:
     out=[]
     for raw in text.split("\n"):
@@ -110,26 +111,20 @@ def arrow(d: ImageDraw.ImageDraw, p1: Tuple[int,int], p2: Tuple[int,int], color=
     d.polygon([p2,a1,a2], fill=color)
 
 def arrow_down(d: ImageDraw.ImageDraw, p1: Tuple[int,int], p2: Tuple[int,int], **kw):
-    """Flecha vertical; si p2 está arriba de p1, invierte para que apunte hacia abajo."""
     if p2[1] < p1[1]:
         p1, p2 = p2, p1
     arrow(d, p1, p2, **kw)
 
-def label_near_segment_outward(
-    d: ImageDraw.ImageDraw, p1, p2, text: str, page_center_x: int, offset: int = 36
-):
-    """Rótulo al lado del segmento (normal), siempre hacia afuera del centro horizontal."""
+def label_near_segment_outward(d: ImageDraw.ImageDraw, p1, p2, text: str, page_center_x: int, offset: int = 36):
     mx, my = (p1[0]+p2[0])/2, (p1[1]+p2[1])/2
     dx, dy = p2[0]-p1[0], p2[1]-p1[1]
     L = max(1.0, math.hypot(dx, dy))
-    nx, ny = -dy/L, dx/L  # normal
+    nx, ny = -dy/L, dx/L
     cand1 = (mx + nx*offset, my + ny*offset)
     cand2 = (mx - nx*offset, my - ny*offset)
-    chosen = cand1 if abs(cand1[0]-page_center_x) > abs(cand2[0]-page_center_x) else cand2
-    tx, ty = chosen
+    tx, ty = (cand1 if abs(cand1[0]-page_center_x) > abs(cand2[0]-page_center_x) else cand2)
     w = d.textlength(text, font=FONT_SMALL); h = FONT_SMALL.size; pad=6
-    d.rounded_rectangle([tx-w/2-pad, ty-h/2-pad, tx+w/2+pad, ty+h/2+pad],
-                        radius=8, fill=WHITE, outline=None)
+    d.rounded_rectangle([tx-w/2-pad, ty-h/2-pad, tx+w/2+pad, ty+h/2+pad], radius=8, fill=WHITE)
     d.text((tx, ty), text, font=FONT_SMALL, fill=BLUE, anchor="mm")
 
 def poly_arrow(d: ImageDraw.ImageDraw, pts, color=BLUE, width=4):
@@ -137,17 +132,13 @@ def poly_arrow(d: ImageDraw.ImageDraw, pts, color=BLUE, width=4):
         d.line([pts[i], pts[i+1]], fill=color, width=width)
     arrow(d, pts[-2], pts[-1], color=color, width=width)
 
-# ---------- Render principal ----------
+# ---------- Render ----------
 def render_png() -> bytes:
-    img=Image.new("RGB",(W,H),BG)
-    d=ImageDraw.Draw(img)
-
-    # Marco y título
+    img=Image.new("RGB",(W,H),BG); d=ImageDraw.Draw(img)
     d.rectangle([20,20,W-20,H-20],outline=BORDER,width=3)
     d.text((W//2,50),"Modelo Preventivo de Gestión Policial – Función de Operacionales",
            font=FONT_TITLE,fill=BLUE,anchor="mm")
 
-    # Columna central
     cx=W//2; vgap=130; bw,bh=480,104; y0=120
     def box(x,y,w=bw,h=bh): return [x-w//2, y-h//2, x+w//2, y+h//2]
     def big(x,y,w,h):       return [x-w//2, y-h//2, x+w//2, y+h//2]
@@ -159,22 +150,18 @@ def render_png() -> bytes:
     r_dec=big(cx,y0+vgap*4,520,124); diamond(d,r_dec); draw_centered(d,q_dec,r_dec)
     r_fin=big(cx,y0+vgap*8+60,560,124); oval(d,r_fin); draw_centered(d,f"FIN\n{t_fin}",r_fin)
 
-    # Conectores (sin pisar texto)
     def top_pt(r):   return ((r[0]+r[2])//2, r[1]-HEAD_CLEAR)
     def bot_pt(r):   return ((r[0]+r[2])//2, r[3]+SAFE)
     def left_pt(r):  return (r[0]-HEAD_CLEAR, (r[1]+r[3])//2)
     def right_pt(r): return (r[2]+HEAD_CLEAR, (r[1]+r[3])//2)
 
-    # Flechas columna central: SIEMPRE hacia abajo
     arrow_down(d, bot_pt(r_inicio), top_pt(r1))
     arrow_down(d, bot_pt(r1),      top_pt(r2))
     arrow_down(d, bot_pt(r2),      top_pt(r3))
     arrow_down(d, bot_pt(r3),      top_pt(r_dec))
-    # ❌ antes: r2 -> FIN (cruzaba el rombo)
-    # ✅ ahora: del rombo al FIN
-    arrow_down(d, ( (r_dec[0]+r_dec[2])//2, r_dec[3]+SAFE ), top_pt(r_fin))
+    arrow_down(d, ((r_dec[0]+r_dec[2])//2, r_dec[3]+SAFE), top_pt(r_fin))
 
-    # ---------- Rama SÍ (autoajustada para que quepa) ----------
+    # ---------- Rama SÍ (compacta 1–5) ----------
     rx=cx+620
     n_items=8
     start_y=(r_dec[1]+r_dec[3])//2 + start_offset
@@ -183,24 +170,47 @@ def render_png() -> bytes:
     widths = int(ancho_si)
     heights=[h_si,h_si,h_si,h_si,h_si5,h_si,h_si,h_si]
 
-    # límites verticales disponibles
-    max_center_y = r_fin[1] - 40  # margen inferior
-    min_center_y = (r_dec[1]+r_dec[3])//2 + 10  # justo bajo el rombo
+    # disponibles
+    max_center_y = r_fin[1] - 40
+    min_center_y = (r_dec[1]+r_dec[3])//2 + 10
 
-    # Paso mínimo para no solapar
-    min_step_required = max((heights[i]/2 + heights[i+1]/2 + 2*HEAD_CLEAR) for i in range(n_items-1))
-    # Paso máximo que todavía cabe con el start_y pedido
-    fit_step = (max_center_y - heights[-1]/2 - start_y) / max(1,(n_items-1))
-    # Si con el start_y elegido no cabe, subimos el arranque al mínimo necesario
-    if fit_step < min_step_required:
-        needed_top = max_center_y - heights[-1]/2 - min_step_required*(n_items-1)
-        start_y = max(min_center_y, needed_top)
-        fit_step = (max_center_y - heights[-1]/2 - start_y) / max(1,(n_items-1))
-    # Paso final: respeta tu slider pero no excede ni cae por debajo del mínimo
-    step = min(step_user, fit_step)
-    step = max(step, min_step_required)
+    # requerimientos mínimos por par
+    req = [(heights[i]/2 + heights[i+1]/2 + 2*HEAD_CLEAR) for i in range(n_items-1)]
 
-    Ys=[start_y + i*step for i in range(n_items)]
+    # multipliers por par (compactamos 1–5 => pares 0..3)
+    mult=[1.0]*(n_items-1)
+    for i in range(0,4):  # 0-1,1-2,2-3,3-4
+        mult[i]=comp_block
+
+    # función: dado base_step, suma de pasos
+    def total_for(base_step: float) -> float:
+        return sum(max(req[i], base_step*mult[i]) for i in range(n_items-1))
+
+    # espacio disponible con start_y actual
+    available = max_center_y - heights[-1]/2 - start_y
+    min_total = sum(req)
+    if available < min_total:
+        # subimos el arranque lo justo para que quepa lo mínimo
+        start_y = max(min_center_y, max_center_y - heights[-1]/2 - min_total)
+        available = max_center_y - heights[-1]/2 - start_y
+
+    # buscamos base_step (binaria) que quepa y respete tu slider
+    hi = step_user
+    lo = 0.0
+    for _ in range(32):
+        mid=(lo+hi)/2
+        if total_for(mid) <= available: lo=mid
+        else: hi=mid
+    base_step = lo
+
+    # pasos finales por par
+    steps = [max(req[i], base_step*mult[i]) for i in range(n_items-1)]
+
+    # construir Ys acumulando pasos
+    Ys=[start_y]
+    for s in steps:
+        Ys.append(Ys[-1] + s)
+
     textos_si=[s1,s2,s3,s4,s5,s6,s7,s8]
     rs=[]
     for i,(t,y) in enumerate(zip(textos_si,Ys)):
@@ -215,13 +225,13 @@ def render_png() -> bytes:
         r=big(lx,int(Ys[i]),widths,h_si)
         rrect(d,r); draw_centered(d,t,r); rn.append(r)
 
-    # Decisión → ramas (rótulos pegados y hacia afuera)
+    # Decisión → ramas (rótulos afuera)
     seg_si = (right_pt(r_dec), (rs[0][0]-HEAD_CLEAR, (rs[0][1]+rs[0][3])//2))
     seg_no = (left_pt(r_dec),  (rn[0][2]+HEAD_CLEAR, (rn[0][1]+rn[0][3])//2))
     arrow(d, *seg_si); label_near_segment_outward(d, *seg_si, "Sí", page_center_x=cx, offset=40)
     arrow(d, *seg_no); label_near_segment_outward(d, *seg_no, "No", page_center_x=cx, offset=40)
 
-    # Cadenas verticales (punta fuera, siempre hacia abajo)
+    # Conexiones verticales (siempre hacia abajo)
     for i in range(len(rs)-1):
         p1=((rs[i][0]+rs[i][2])//2, rs[i][3]+SAFE)
         p2=((rs[i+1][0]+rs[i+1][2])//2, rs[i+1][1]-HEAD_CLEAR)
@@ -231,7 +241,7 @@ def render_png() -> bytes:
         p2=((rn[i+1][0]+rn[i+1][2])//2, rn[i+1][1]-HEAD_CLEAR)
         arrow_down(d,p1,p2)
 
-    # Retroalimentación: riel externo (sin cruces) y limitado al borde
+    # Retroalimentación (riel externo limitado)
     rail_x = min(W-40, rs[-1][2] + retro_rail)
     start = (rs[-1][2]+SAFE, (rs[-1][1]+rs[-1][3])//2)
     mid1  = (rail_x, start[1])
