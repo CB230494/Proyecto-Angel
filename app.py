@@ -1,16 +1,14 @@
 # =========================
 # 📊 Diagrama MPGP – Exportador (Pillow, layout limpio y ajustable)
 # =========================
-# - Sin matplotlib / reportlab / cairo / graphviz
 # - PNG, PDF y PPTX
-# - Flechas con separación de seguridad
-# - Rótulos Sí/No fuera del trazo
+# - Flechas con separación de seguridad + rótulos Sí/No fuera
 # - Retroalimentación por riel externo (sin cruces)
-# - SÍ 5 redimensionable y ancho de toda la rama SÍ configurable
+# - SÍ 5 redimensionable (alto) + ancho de toda la rama SÍ configurable
 # =========================
 
 import io, math
-from typing import List
+from typing import List, Tuple
 from PIL import Image, ImageDraw, ImageFont
 import streamlit as st
 from pptx import Presentation
@@ -69,7 +67,7 @@ with g3:
     compacto=st.toggle("Modo compacto", True)
 g4,g5,g6 = st.columns(3)
 with g4:
-    altura_si5 = st.slider("Altura cuadro SÍ 5 (px)", 100, 240, 170, 5)
+    altura_si5 = st.slider("Altura cuadro SÍ 5 (px)", 110, 260, 170, 5)
 with g5:
     ancho_si   = st.slider("Ancho cuadros rama SÍ (px)", 520, 680, 580, 10)
 with g6:
@@ -103,7 +101,7 @@ def diamond(d, box, fill=LIGHTYELLOW, outline=BLUE, width=3):
     x0,y0,x1,y1=box; cx=(x0+x1)//2; cy=(y0+y1)//2
     pts=[(cx,y0),(x1,cy),(cx,y1),(x0,cy)]; d.polygon(pts,fill=fill,outline=outline)
 
-def arrow(d: ImageDraw.ImageDraw, p1, p2, color=BLUE, width=4):
+def arrow(d: ImageDraw.ImageDraw, p1: Tuple[int,int], p2: Tuple[int,int], color=BLUE, width=4):
     d.line([p1,p2], fill=color, width=width)
     ang=math.atan2(p2[1]-p1[1], p2[0]-p1[0])
     a1=(p2[0]-ARROW_HEAD*math.cos(ang-0.4), p2[1]-ARROW_HEAD*math.sin(ang-0.4))
@@ -139,7 +137,7 @@ def render_png() -> bytes:
     r_dec=big(cx,y0+vgap*4,520,124); diamond(d,r_dec); draw_centered(d,q_dec,r_dec)
     r_fin=big(cx,y0+vgap*8+60,560,124); oval(d,r_fin); draw_centered(d,f"FIN\n{t_fin}",r_fin)
 
-    # Puntos de conexión (separados del texto)
+    # Conectores (separados del texto)
     def top_pt(r):   return ((r[0]+r[2])//2, r[1]-HEAD_CLEAR)
     def bot_pt(r):   return ((r[0]+r[2])//2, r[3]+SAFE)
     def left_pt(r):  return (r[0]-HEAD_CLEAR, (r[1]+r[3])//2)
@@ -152,7 +150,7 @@ def render_png() -> bytes:
     arrow(d, bot_pt(r3),      top_pt(r_dec))
     arrow(d, bot_pt(r2),      top_pt(r_fin))  # despeja el rombo
 
-    # ---- Rama SÍ (espaciado auto + SÍ5/ANCHO configurables) ----
+    # ---------- Rama SÍ ----------
     rx=cx+620
     n_items=8
     start_y=(r_dec[1]+r_dec[3])//2 + start_offset
@@ -161,13 +159,12 @@ def render_png() -> bytes:
     h_si  = 86 if compacto else 100
     h_si5 = int(altura_si5)
     widths = int(ancho_si)
-
     heights=[h_si,h_si,h_si,h_si,h_si5,h_si,h_si,h_si]
 
-    # Paso mínimo (para no solapar) y paso que cabe hasta abajo
-    min_step_required = max( (heights[i]/2 + heights[i+1]/2 + 2*HEAD_CLEAR) for i in range(n_items-1) )
+    # Paso mínimo (no solapar) y paso para que quepa
+    min_step_required = max((heights[i]/2 + heights[i+1]/2 + 2*HEAD_CLEAR) for i in range(n_items-1))
     fit_step = (safe_bottom - (start_y + heights[-1]/2)) / max(1,(n_items-1))
-    fit_step = max(130, fit_step)  # por si el usuario sube mucho el inicio
+    fit_step = max(130, fit_step)
     step = max(min_step_required, min(step_user, fit_step))
 
     Ys=[start_y + i*step for i in range(n_items)]
@@ -178,14 +175,14 @@ def render_png() -> bytes:
         r=big(rx,int(y),widths,h)
         rrect(d,r); draw_centered(d,t,r); rs.append(r)
 
-    # ---- Rama NO (alineada con los 3 primeros SÍ) ----
+    # ---------- Rama NO ----------
     lx=cx-620
     rn=[]
     for i,t in enumerate([n1,n2,n3]):
         r=big(lx,int(Ys[i]),widths,h_si)
         rrect(d,r); draw_centered(d,t,r); rn.append(r)
 
-    # Decisión → ramas (rótulos por fuera)
+    # Decisión → ramas (rótulos fuera)
     arrow(d, right_pt(r_dec), (rs[0][0]-HEAD_CLEAR, (rs[0][1]+rs[0][3])//2))
     arrow(d, left_pt(r_dec),  (rn[0][2]+HEAD_CLEAR, (rn[0][1]+rn[0][3])//2))
     draw_label(d, right_pt(r_dec)[0]+70, right_pt(r_dec)[1]-40, "Sí")
@@ -201,13 +198,15 @@ def render_png() -> bytes:
         p2=((rn[i+1][0]+rn[i+1][2])//2, rn[i+1][1]-HEAD_CLEAR)
         arrow(d,p1,p2)
 
-    # Retroalimentación: riel externo a la derecha (sin cruces)
+    # Retroalimentación: riel externo (sin cruces)
     rail_x = rs[-1][2] + retro_rail
-    start = (rs[-1][2]+SAFE, (rs[-1][1]+rs[-1][3])//2)
-    mid1  = (rail_x, start[1])                         # sale horizontal al riel
-    mid2  = (rail_x, (r2[1]+r2[3])//2)                # baja/sube por riel
-    end   = (r2[2]+HEAD_CLEAR, (r2[1]+r2[3])//2)      # entra por la derecha del Bloque 2
+    start = (rs[-1][2]+SAFE, (rs[-1][1]+rs[-1][3])//2)   # sale del último SÍ
+    mid1  = (rail_x, start[1])                          # hacia el riel
+    mid2  = (rail_x, (r2[1]+r2[3])//2)                  # sube/baja por el riel
+    end   = (r2[2]+HEAD_CLEAR, (r2[1]+r2[3])//2)        # entra por la derecha del Bloque 2
     poly_arrow(d, [start, mid1, mid2, end], color=BLUE, width=4)
+    # Etiqueta cerca del riel
+    d.text((rail_x-10, (start[1]+mid2[1])//2), "Retroalimentación", font=FONT_SMALL, fill=BLUE, anchor="rm")
 
     # Export PNG bytes
     out=io.BytesIO()
@@ -217,12 +216,12 @@ def render_png() -> bytes:
 # ---------- Exportadores ----------
 def make_pdf_from_png(png_bytes: bytes) -> bytes:
     img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-    out = io.BytesIO(); img.save(out, format="PDF")  # una página
+    out = io.BytesIO(); img.save(out, format="PDF")  # 1 página
     return out.getvalue()
 
 def make_pptx(png_bytes: bytes) -> bytes:
     prs = Presentation()
-    slide = prs.slides.add_slide(prs.slide_layouts[6])  # lienzo en blanco
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
     slide.shapes.add_picture(io.BytesIO(png_bytes), Inches(0.2), Inches(0.2), width=Inches(9.6))
     out = io.BytesIO(); prs.save(out); return out.getvalue()
 
@@ -240,7 +239,5 @@ with c2: st.download_button("⬇️ PDF", pdf_bytes, "diagrama_modelo_preventivo
 with c3: st.download_button("⬇️ PPTX", pptx_bytes, "diagrama_modelo_preventivo.pptx",
                             "application/vnd.openxmlformats-officedocument.presentationml.presentation")
 
-st.info("Si necesitás más aire, subí el espaciado, mové el inicio de la rama SÍ más arriba o ensanchá los cuadros.")
-
-
+st.info("Tip: si aún ves flechas cerca de textos, subí el espaciado, mové el inicio de la rama SÍ más arriba o ensanchá los cuadros.")
 
