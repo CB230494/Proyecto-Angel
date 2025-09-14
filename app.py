@@ -1,6 +1,13 @@
 # =========================
-# 📊 Diagrama MPGP – Exportador (Pillow, flechas ordenadas + rótulos fuera)
+# 📊 Diagrama MPGP – Exportador (Pillow, flechas ordenadas + SÍ5 ajustable)
 # =========================
+# - Sin matplotlib / reportlab / cairo / graphviz
+# - PNG, PDF y PPTX
+# - Espaciado uniforme y seguro entre cuadros
+# - Rótulos "Sí/No" fuera de las flechas
+# - Tamaño del cuadro SÍ 5 (alto) y ancho de toda la rama SÍ configurables
+# =========================
+
 import io, math, textwrap
 from typing import List
 from PIL import Image, ImageDraw, ImageFont
@@ -11,18 +18,21 @@ from pptx.util import Inches
 # ---- Config y estilos ----
 st.set_page_config(page_title="Diagrama MPGP – Exportador", layout="wide")
 st.title("Diagrama de Flujo – Modelo Preventivo de Gestión Policial")
-st.caption("Más espacio entre cuadros y rótulos Sí/No fuera de las flechas.")
+st.caption("Rama SÍ con espaciado automático, rótulos fuera y SÍ 5 redimensionable. Exporta PNG, PDF y PPTX.")
 
 BLUE=(31,78,121); BORDER=(155,187,217); LIGHTBLUE=(220,235,247); LIGHTYELLOW=(255,248,225)
 WHITE=(255,255,255); BLACK=(0,0,0); BG=(247,250,255)
-W,H=2000,1400; SAFE=16; ARROW_HEAD=18
+
+W,H=2000,1400                # tamaño del lienzo
+SAFE=16                      # margen para que flechas no toquen cajas
+ARROW_HEAD=18                # tamaño de cabeza de flecha
 
 def font(size):
     try: return ImageFont.truetype("DejaVuSans.ttf", size)
     except: return ImageFont.load_default()
 FONT=font(22); FONT_SMALL=font(18); FONT_TITLE=font(28)
 
-# ---- Inputs ----
+# ---- Inputs de contenido ----
 cA,cB = st.columns(2)
 with cA:
     t_inicio=st.text_input("INICIO","Planificación preventiva anual")
@@ -39,6 +49,7 @@ with cB:
     s6=st.text_area("SÍ 6","Reporte de operativos (RAP, DATAPOL, informes)")
     s7=st.text_area("SÍ 7","Evaluación de cumplimiento (Trazabilidad 3.1 y 3.2)")
     s8=st.text_area("SÍ 8","Retroalimentación a la planificación preventiva")
+
 cC,cD = st.columns(2)
 with cC:
     n1=st.text_area("NO 1","Patrullaje rutinario y vigilancia continua")
@@ -47,17 +58,24 @@ with cC:
 with cD:
     t_fin=st.text_area("FIN","Evaluación global de resultados\n(Indicadores, metas, impacto – 3.3)")
 
+# ---- Ajustes de layout ----
 st.markdown("### ⚙️ Ajustes de layout")
-g1,g2,g3=st.columns(3)
+g1,g2,g3 = st.columns(3)
 with g1:
     start_offset=st.slider("Inicio rama SÍ (relativo a la decisión)", -260, 120, -90, 5)
 with g2:
-    step_user=st.slider("Espaciado vertical (px)", 120, 200, 140, 5)
+    step_user=st.slider("Espaciado vertical deseado (px)", 120, 200, 140, 5)
 with g3:
     compacto=st.toggle("Modo compacto", True)
 
+g4,g5 = st.columns(2)
+with g4:
+    altura_si5 = st.slider("Altura cuadro SÍ 5 (px)", 100, 220, 160, 5)    # 👈 alto de “Implementación en terreno”
+with g5:
+    ancho_si   = st.slider("Ancho cuadros rama SÍ (px)", 500, 640, 560, 10) # 👈 ancho de toda la rama SÍ
+
 # ---- helpers de texto/dibujo ----
-def wrap_text(d, text, font, max_w):
+def wrap_text(d, text, font, max_w) -> List[str]:
     out=[]
     for raw in text.split("\n"):
         words=raw.split(" "); line=""
@@ -100,7 +118,7 @@ def quad_curve_points(p0,p1,p2,steps=70):
         pts.append((x,y))
     return pts
 
-def curved_arrow(d, p1, p2, curve=0.48, color=BLUE, width=4):
+def curved_arrow(d, p1, p2, curve=0.55, color=BLUE, width=4):
     mx,my=(p1[0]+p2[0])/2,(p1[1]+p2[1])/2
     dx,dy=p2[0]-p1[0],p2[1]-p1[1]; L=max(1,math.hypot(dx,dy))
     nx,ny=-dy/L,dx/L
@@ -120,6 +138,7 @@ def render_png():
     d.rectangle([20,20,W-20,H-20],outline=BORDER,width=3)
     d.text((W//2,50),"Modelo Preventivo de Gestión Policial – Función de Operacionales",font=FONT_TITLE,fill=BLUE,anchor="mm")
 
+    # Columna central
     cx=W//2; vgap=130; bw,bh=480,104; y0=120
     def box(x,y,w=bw,h=bh): return [x-w//2, y-h//2, x+w//2, y+h//2]
     def big(x,y,w,h): return [x-w//2, y-h//2, x+w//2, y+h//2]
@@ -137,40 +156,51 @@ def render_png():
     def left(r): return (r[0]-SAFE, (r[1]+r[3])//2)
     def right(r): return (r[2]+SAFE, (r[1]+r[3])//2)
 
-    # Columna central
+    # Columna central (flechas despejadas)
     arrow(d, bot(r_inicio), top(r1))
     arrow(d, bot(r1), top(r2))
     arrow(d, bot(r2), top(r3))
     arrow(d, bot(r3), top(r_dec))
-    arrow(d, bot(r2), top(r_fin))  # Fin directo desde bloque 2 (para despejar el centro)
+    arrow(d, bot(r2), top(r_fin))  # directo a FIN para despejar el centro
 
-    # ---- Rama SÍ (más espacio) ----
+    # ---- Rama SÍ (espaciado auto + SÍ5 y ancho configurables) ----
     rx=cx+600
     n_items=8
     start_y=(r_dec[1]+r_dec[3])//2 + start_offset
     safe_bottom=r_fin[1]-190
-    step=min(step_user, max(120, (safe_bottom-start_y)/max(1,(n_items-1))))
 
-    h_si=84 if compacto else 98
-    h_si5=h_si+(0 if compacto else 10)
+    # alturas
+    h_si  = 84 if compacto else 98
+    h_si5 = int(altura_si5)                     # tamaño del SÍ 5
+    widths = int(ancho_si)
+
+    heights=[h_si,h_si,h_si,h_si,h_si5,h_si,h_si,h_si]
+    # paso mínimo para no solapar
+    min_step_required = max( (heights[i]/2 + heights[i+1]/2 + 2*SAFE) for i in range(n_items-1) )
+    # paso para que quepa en el espacio disponible
+    fit_step = (safe_bottom - (start_y + heights[-1]/2)) / max(1,(n_items-1))
+    fit_step = max(120, fit_step)
+    # paso final
+    step = max(min_step_required, min(step_user, fit_step))
 
     Ys=[start_y + i*step for i in range(n_items)]
     textos_si=[s1,s2,s3,s4,s5,s6,s7,s8]
     rs=[]
     for i,(t,y) in enumerate(zip(textos_si,Ys)):
-        h=h_si5 if i==4 else h_si
-        r=big(rx,int(y),540,h); rrect(d,r); draw_centered(d,t,r); rs.append(r)
+        h = heights[i]
+        r=big(rx,int(y),widths,h)
+        rrect(d,r); draw_centered(d,t,r); rs.append(r)
 
     # ---- Rama NO (alineada con los 3 primeros SÍ) ----
     lx=cx-600
     textos_no=[n1,n2,n3]; rn=[]
     for i,t in enumerate(textos_no):
-        r=big(lx,int(Ys[i]),540,h_si); rrect(d,r); draw_centered(d,t,r); rn.append(r)
+        r=big(lx,int(Ys[i]),widths,h_si)
+        rrect(d,r); draw_centered(d,t,r); rn.append(r)
 
-    # Decisión → ramas (rótulos fuera)
+    # Decisión → ramas (rótulos por fuera)
     arrow(d, right(r_dec), (rs[0][0]-SAFE, (rs[0][1]+rs[0][3])//2))
     arrow(d, left(r_dec),  (rn[0][2]+SAFE, (rn[0][1]+rn[0][3])//2))
-    # Etiquetas colocadas arriba y hacia afuera
     draw_label(d, right(r_dec)[0]+60, right(r_dec)[1]-40, "Sí")
     draw_label(d, left(r_dec)[0]-60,  left(r_dec)[1]-40,  "No")
 
@@ -186,13 +216,14 @@ def render_png():
         p2=((rn[i+1][0]+rn[i+1][2])//2, rn[i+1][1]-SAFE)
         arrow(d,p1,p2)
 
-    # Retroalimentación (curva externa)
+    # Retroalimentación (curva externa, alta)
     curved_arrow(d, (rs[-1][0]-SAFE, (rs[-1][1]+rs[-1][3])//2),
                     (r2[2]+SAFE,     (r2[1]+r2[3])//2),
                     curve=0.55)
 
     out=io.BytesIO(); img.save(out,format="PNG"); return out.getvalue()
 
+# ---- Exportadores ----
 def make_pdf_from_png(png_bytes):
     from PIL import Image as PImage
     img=PImage.open(io.BytesIO(png_bytes)).convert("RGB")
@@ -216,6 +247,6 @@ with c2: st.download_button("⬇️ PDF", pdf_bytes, "diagrama_modelo_preventivo
 with c3: st.download_button("⬇️ PPTX", pptx_bytes, "diagrama_modelo_preventivo.pptx",
                             "application/vnd.openxmlformats-officedocument.presentationml.presentation")
 
-st.info("Si aún ves rótulos muy cerca, subí el espaciado o mueve el inicio de la rama SÍ más arriba.")
+st.info("Si aún falta aire, aumentá el espaciado, subí el inicio de la rama SÍ o ensanchá los cuadros.")
 
 
