@@ -1,11 +1,11 @@
 # =========================
-# 📊 Diagrama MPGP – Exportador (Pillow, layout estable y rótulos correctos)
+# 📊 Diagrama MPGP – Exportador (Pillow, layout estable y claro)
 # =========================
 # - PNG, PDF y PPTX
-# - Conectores SIEMPRE hacia abajo en columna central y rama SÍ/NO
-# - Rótulos "Sí/No" pegados a la flecha (normal perpendicular) y hacia fuera
-# - Retroalimentación por riel externo, con límites al borde
-# - SÍ 5 redimensionable (alto) + ancho de la rama SÍ configurable
+# - Conectores limpios (sin cruces)
+# - Rótulos "Sí/No" pegados a su flecha y hacia afuera
+# - Rama SÍ autoajustada para que SIEMPRE quepa
+# - SÍ 5 redimensionable (alto) + ancho de toda la rama SÍ configurable
 # =========================
 
 import io, math
@@ -110,7 +110,7 @@ def arrow(d: ImageDraw.ImageDraw, p1: Tuple[int,int], p2: Tuple[int,int], color=
     d.polygon([p2,a1,a2], fill=color)
 
 def arrow_down(d: ImageDraw.ImageDraw, p1: Tuple[int,int], p2: Tuple[int,int], **kw):
-    """Dibuja flecha vertical asegurando que la punta quede abajo (si no, invierte)."""
+    """Flecha vertical; si p2 está arriba de p1, invierte para que apunte hacia abajo."""
     if p2[1] < p1[1]:
         p1, p2 = p2, p1
     arrow(d, p1, p2, **kw)
@@ -118,18 +118,15 @@ def arrow_down(d: ImageDraw.ImageDraw, p1: Tuple[int,int], p2: Tuple[int,int], *
 def label_near_segment_outward(
     d: ImageDraw.ImageDraw, p1, p2, text: str, page_center_x: int, offset: int = 36
 ):
-    """Coloca el rótulo pegado al segmento (normal), siempre hacia afuera del centro de la página."""
+    """Rótulo al lado del segmento (normal), siempre hacia afuera del centro horizontal."""
     mx, my = (p1[0]+p2[0])/2, (p1[1]+p2[1])/2
     dx, dy = p2[0]-p1[0], p2[1]-p1[1]
     L = max(1.0, math.hypot(dx, dy))
     nx, ny = -dy/L, dx/L  # normal
-    # Dos candidatos (izq/der del segmento)
     cand1 = (mx + nx*offset, my + ny*offset)
     cand2 = (mx - nx*offset, my - ny*offset)
-    # elegimos el que quede más lejos del centro vertical de la página
     chosen = cand1 if abs(cand1[0]-page_center_x) > abs(cand2[0]-page_center_x) else cand2
     tx, ty = chosen
-    # cajita blanca para legibilidad
     w = d.textlength(text, font=FONT_SMALL); h = FONT_SMALL.size; pad=6
     d.rounded_rectangle([tx-w/2-pad, ty-h/2-pad, tx+w/2+pad, ty+h/2+pad],
                         radius=8, fill=WHITE, outline=None)
@@ -162,35 +159,46 @@ def render_png() -> bytes:
     r_dec=big(cx,y0+vgap*4,520,124); diamond(d,r_dec); draw_centered(d,q_dec,r_dec)
     r_fin=big(cx,y0+vgap*8+60,560,124); oval(d,r_fin); draw_centered(d,f"FIN\n{t_fin}",r_fin)
 
-    # Conectores (separados del texto)
+    # Conectores (sin pisar texto)
     def top_pt(r):   return ((r[0]+r[2])//2, r[1]-HEAD_CLEAR)
     def bot_pt(r):   return ((r[0]+r[2])//2, r[3]+SAFE)
     def left_pt(r):  return (r[0]-HEAD_CLEAR, (r[1]+r[3])//2)
     def right_pt(r): return (r[2]+HEAD_CLEAR, (r[1]+r[3])//2)
 
-    # Flechas columna central (siempre hacia abajo)
+    # Flechas columna central: SIEMPRE hacia abajo
     arrow_down(d, bot_pt(r_inicio), top_pt(r1))
     arrow_down(d, bot_pt(r1),      top_pt(r2))
     arrow_down(d, bot_pt(r2),      top_pt(r3))
     arrow_down(d, bot_pt(r3),      top_pt(r_dec))
-    arrow_down(d, bot_pt(r2),      top_pt(r_fin))  # despeja el rombo
+    # ❌ antes: r2 -> FIN (cruzaba el rombo)
+    # ✅ ahora: del rombo al FIN
+    arrow_down(d, ( (r_dec[0]+r_dec[2])//2, r_dec[3]+SAFE ), top_pt(r_fin))
 
-    # ---------- Rama SÍ ----------
+    # ---------- Rama SÍ (autoajustada para que quepa) ----------
     rx=cx+620
     n_items=8
     start_y=(r_dec[1]+r_dec[3])//2 + start_offset
-    safe_bottom=r_fin[1]-200
-
     h_si  = 86 if compacto else 100
     h_si5 = int(altura_si5)
     widths = int(ancho_si)
     heights=[h_si,h_si,h_si,h_si,h_si5,h_si,h_si,h_si]
 
-    # Paso mínimo (no solapar) y paso para que quepa
+    # límites verticales disponibles
+    max_center_y = r_fin[1] - 40  # margen inferior
+    min_center_y = (r_dec[1]+r_dec[3])//2 + 10  # justo bajo el rombo
+
+    # Paso mínimo para no solapar
     min_step_required = max((heights[i]/2 + heights[i+1]/2 + 2*HEAD_CLEAR) for i in range(n_items-1))
-    fit_step = (safe_bottom - (start_y + heights[-1]/2)) / max(1,(n_items-1))
-    fit_step = max(130, fit_step)
-    step = max(min_step_required, min(step_user, fit_step))
+    # Paso máximo que todavía cabe con el start_y pedido
+    fit_step = (max_center_y - heights[-1]/2 - start_y) / max(1,(n_items-1))
+    # Si con el start_y elegido no cabe, subimos el arranque al mínimo necesario
+    if fit_step < min_step_required:
+        needed_top = max_center_y - heights[-1]/2 - min_step_required*(n_items-1)
+        start_y = max(min_center_y, needed_top)
+        fit_step = (max_center_y - heights[-1]/2 - start_y) / max(1,(n_items-1))
+    # Paso final: respeta tu slider pero no excede ni cae por debajo del mínimo
+    step = min(step_user, fit_step)
+    step = max(step, min_step_required)
 
     Ys=[start_y + i*step for i in range(n_items)]
     textos_si=[s1,s2,s3,s4,s5,s6,s7,s8]
@@ -207,14 +215,13 @@ def render_png() -> bytes:
         r=big(lx,int(Ys[i]),widths,h_si)
         rrect(d,r); draw_centered(d,t,r); rn.append(r)
 
-    # Decisión → ramas (con rótulo pegado y hacia afuera)
+    # Decisión → ramas (rótulos pegados y hacia afuera)
     seg_si = (right_pt(r_dec), (rs[0][0]-HEAD_CLEAR, (rs[0][1]+rs[0][3])//2))
     seg_no = (left_pt(r_dec),  (rn[0][2]+HEAD_CLEAR, (rn[0][1]+rn[0][3])//2))
-
     arrow(d, *seg_si); label_near_segment_outward(d, *seg_si, "Sí", page_center_x=cx, offset=40)
     arrow(d, *seg_no); label_near_segment_outward(d, *seg_no, "No", page_center_x=cx, offset=40)
 
-    # Cadenas verticales (punta fuera de la caja destino, siempre hacia abajo)
+    # Cadenas verticales (punta fuera, siempre hacia abajo)
     for i in range(len(rs)-1):
         p1=((rs[i][0]+rs[i][2])//2, rs[i][3]+SAFE)
         p2=((rs[i+1][0]+rs[i+1][2])//2, rs[i+1][1]-HEAD_CLEAR)
@@ -224,18 +231,16 @@ def render_png() -> bytes:
         p2=((rn[i+1][0]+rn[i+1][2])//2, rn[i+1][1]-HEAD_CLEAR)
         arrow_down(d,p1,p2)
 
-    # Retroalimentación: riel externo (sin cruces) y limitado a borde
+    # Retroalimentación: riel externo (sin cruces) y limitado al borde
     rail_x = min(W-40, rs[-1][2] + retro_rail)
-    start = (rs[-1][2]+SAFE, (rs[-1][1]+rs[-1][3])//2)   # sale del último SÍ
-    mid1  = (rail_x, start[1])                          # hacia el riel
-    mid2  = (rail_x, (r2[1]+r2[3])//2)                  # sube/baja por el riel
-    end   = (r2[2]+HEAD_CLEAR, (r2[1]+r2[3])//2)        # entra por derecha al Bloque 2
+    start = (rs[-1][2]+SAFE, (rs[-1][1]+rs[-1][3])//2)
+    mid1  = (rail_x, start[1])
+    mid2  = (rail_x, (r2[1]+r2[3])//2)
+    end   = (r2[2]+HEAD_CLEAR, (r2[1]+r2[3])//2)
     poly_arrow(d, [start, mid1, mid2, end], color=BLUE, width=4)
-    # Etiqueta cerca del riel, recortada si hace falta
-    label_x = min(W-50, rail_x-10)
-    d.text((label_x, (start[1]+mid2[1])//2), "Retroalimentación", font=FONT_SMALL, fill=BLUE, anchor="rm")
+    d.text((min(W-50, rail_x-10), (start[1]+mid2[1])//2),
+           "Retroalimentación", font=FONT_SMALL, fill=BLUE, anchor="rm")
 
-    # Export PNG bytes
     out=io.BytesIO(); img.save(out, format="PNG"); return out.getvalue()
 
 # ---------- Exportadores ----------
