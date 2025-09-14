@@ -1,5 +1,5 @@
 # =========================
-# Diagrama MPGP – Exportador (PNG, PDF, PPTX) sin Cairo/Graphviz
+# Diagrama MPGP – Exportador (PNG, PDF, PPTX) sin reportlab/cairo/graphviz
 # =========================
 import io
 from dataclasses import dataclass
@@ -7,18 +7,16 @@ from typing import Tuple, List
 
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4, landscape
 from pptx import Presentation
 from pptx.util import Inches
 
 st.set_page_config(page_title="Diagrama MPGP – Exportador", layout="wide")
 st.title("Diagrama de Flujo – Modelo Preventivo de Gestión Policial")
-st.caption("Genera PNG, PDF y PPTX sin dependencias del sistema (no usa Cairo ni Graphviz).")
+st.caption("Genera PNG, PDF y PPTX sin dependencias nativas (solo Pillow + python-pptx).")
 
 # ---------- Fuentes ----------
 def load_font(size=20):
-    # Usa una fuente común en la mayoría de entornos; si no está, usa la default de PIL
+    # DejaVuSans suele estar disponible; si no, usa la default de PIL
     try:
         return ImageFont.truetype("DejaVuSans.ttf", size)
     except Exception:
@@ -73,8 +71,6 @@ class Node:
     h: int
     text: str
     shape: str = "rect"   # rect | oval | diamond
-    fill: Tuple[int,int,int] = WHITE
-    stroke: Tuple[int,int,int] = BLUE
 
 def wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_w: int) -> List[str]:
     lines = []
@@ -118,12 +114,9 @@ def diamond(draw: ImageDraw.ImageDraw, box, fill=LIGHTYELLOW, outline=BLUE, widt
     cy = (y0 + y1) // 2
     pts = [(cx, y0), (x1, cy), (cx, y1), (x0, cy)]
     draw.polygon(pts, fill=fill, outline=outline)
-    draw.line(pts + [pts[0]], fill=outline, width=width)
 
 def arrow(draw: ImageDraw.ImageDraw, p1, p2, color=BLUE, width=4, label:str=""):
-    # línea
     draw.line([p1, p2], fill=color, width=width)
-    # cabeza triangular
     import math
     ang = math.atan2(p2[1]-p1[1], p2[0]-p1[0])
     L = 18
@@ -144,134 +137,114 @@ def render_png() -> bytes:
     title = "Modelo Preventivo de Gestión Policial – Función de Operacionales"
     d.text((W//2, 50), title, font=FONT_TITLE, fill=BLUE, anchor="mm")
 
-    # Geometría
     cx = W//2
     vgap = 130
-    box = (420, 90)  # w, h
+    bw, bh = 420, 90
     y0 = 120
 
-    # Nodos columna central
-    def box_rect(x,y): return [x-box[0]//2, y-box[1]//2, x+box[0]//2, y+box[1]//2]
-    def box_big(x,y,w,h): return [x-w//2, y-h//2, x+w//2, y+h//2]
+    def rect(x,y,w=bw,h=bh): return [x-w//2, y-h//2, x+w//2, y+h//2]
+    def big(x,y,w,h): return [x-w//2, y-h//2, x+w//2, y+h//2]
 
-    # Inicio (óvalo)
-    r_inicio = box_rect(cx, y0)
+    r_inicio = rect(cx, y0)
     oval(d, r_inicio, fill=LIGHTBLUE, outline=BLUE)
-    draw_centered_multiline(d, f"INICIO\n{titulo_inicio}", r_inicio, font=FONT)
+    draw_centered_multiline(d, f"INICIO\n{titulo_inicio}", r_inicio)
 
-    r1 = box_rect(cx, y0+vgap)
-    rounded_rect(d, r1)
-    draw_centered_multiline(d, bloque_1, r1)
-
-    r2 = box_rect(cx, y0+vgap*2)
-    rounded_rect(d, r2)
-    draw_centered_multiline(d, bloque_2, r2)
-
-    r3 = box_rect(cx, y0+vgap*3)
-    rounded_rect(d, r3)
-    draw_centered_multiline(d, bloque_3, r3)
-
-    r_dec = box_big(cx, y0+vgap*4, 440, 110)
-    diamond(d, r_dec, fill=LIGHTYELLOW, outline=BLUE)
-    draw_centered_multiline(d, decision_txt, r_dec)
-
-    r_fin = box_big(cx, y0+vgap*8+60, 460, 110)
-    oval(d, r_fin, fill=LIGHTBLUE, outline=BLUE)
-    draw_centered_multiline(d, f"FIN\n{fin_txt}", r_fin)
+    r1 = rect(cx, y0+vgap);            rounded_rect(d, r1); draw_centered_multiline(d, bloque_1, r1)
+    r2 = rect(cx, y0+vgap*2);          rounded_rect(d, r2); draw_centered_multiline(d, bloque_2, r2)
+    r3 = rect(cx, y0+vgap*3);          rounded_rect(d, r3); draw_centered_multiline(d, bloque_3, r3)
+    r_dec = big(cx, y0+vgap*4, 460, 120); diamond(d, r_dec, fill=LIGHTYELLOW, outline=BLUE); draw_centered_multiline(d, decision_txt, r_dec)
+    r_fin = big(cx, y0+vgap*8+60, 480, 120); oval(d, r_fin, fill=LIGHTBLUE, outline=BLUE); draw_centered_multiline(d, f"FIN\n{fin_txt}", r_fin)
 
     # Rama SÍ (derecha)
-    rx = cx + 500
+    rx = cx + 520
     rs = []
     texts_si = [rama_si_1, rama_si_2, rama_si_3, rama_si_4, rama_si_5, rama_si_6, rama_si_7, rama_si_8]
-    y = r_dec[1] + 80
+    y = (r_dec[1]+r_dec[3])//2 + 80
     for i, t in enumerate(texts_si):
-        h = 90 if i == 4 else 80
-        rect = box_big(rx, y + i*105, 480, h)
-        rounded_rect(d, rect)
-        draw_centered_multiline(d, t, rect)
-        rs.append(rect)
+        h = 110 if i == 4 else 100
+        rect_i = big(rx, y + i*110, 500, h)
+        rounded_rect(d, rect_i)
+        draw_centered_multiline(d, t, rect_i)
+        rs.append(rect_i)
 
     # Rama NO (izquierda)
-    lx = cx - 500
+    lx = cx - 520
     rn = []
     texts_no = [rama_no_1, rama_no_2, rama_no_3]
     for i, t in enumerate(texts_no):
-        rect = box_big(lx, rs[0][1] + i*105, 480, 80)
-        rounded_rect(d, rect)
-        draw_centered_multiline(d, t, rect)
-        rn.append(rect)
+        rect_i = big(lx, (rs[0][1]+rs[0][3])//2 + i*110, 500, 100)
+        rounded_rect(d, rect_i)
+        draw_centered_multiline(d, t, rect_i)
+        rn.append(rect_i)
+
+    # Utilidades
+    def c_bottom(r): return ((r[0]+r[2])//2, r[3])
+    def c_top(r):    return ((r[0]+r[2])//2, r[1])
+    def m_left(r):   return (r[0], (r[1]+r[3])//2)
+    def m_right(r):  return (r[2], (r[1]+r[3])//2)
 
     # Flechas columna central
-    def center_bottom(r): return ((r[0]+r[2])//2, r[3])
-    def center_top(r): return ((r[0]+r[2])//2, r[1])
-    def mid_left(r): return (r[0], (r[1]+r[3])//2)
-    def mid_right(r): return (r[2], (r[1]+r[3])//2)
+    arrow(d, c_bottom(r_inicio), c_top(r1))
+    arrow(d, c_bottom(r1), c_top(r2))
+    arrow(d, c_bottom(r2), c_top(r3))
+    arrow(d, c_bottom(r3), c_top(r_dec))
 
-    arrow(d, center_bottom(r_inicio), center_top(r1))
-    arrow(d, center_bottom(r1), center_top(r2))
-    arrow(d, center_bottom(r2), center_top(r3))
-    arrow(d, center_bottom(r3), center_top(r_dec))
-
-    # Decisión
-    arrow(d, (mid_right(r_dec)[0]+10, mid_right(r_dec)[1]), (mid_left(rs[0])[0]-10, mid_left(rs[0])[1]), label="Sí")
-    arrow(d, (mid_left(r_dec)[0]-10, mid_left(r_dec)[1]), (mid_right(rn[0])[0]+10, mid_right(rn[0])[1]), label="No")
+    # Decisión a ramas
+    arrow(d, (m_right(r_dec)[0]+10, m_right(r_dec)[1]), (m_left(rs[0])[0]-10, m_left(rs[0])[1]), label="Sí")
+    arrow(d, (m_left(r_dec)[0]-10, m_left(r_dec)[1]), (m_right(rn[0])[0]+10, m_right(rn[0])[1]), label="No")
 
     # Cadena SÍ
     for i in range(len(rs)-1):
-        arrow(d, center_bottom(rs[i]), center_top(rs[i+1]))
-    # Retroalimentación a análisis (rs[-1] → r2)
-    arrow(d, (mid_left(rs[-1])[0]-2, mid_left(rs[-1])[1]), (mid_right(r2)[0]+2, mid_right(r2)[1]), label="Retroalimentación")
+        arrow(d, c_bottom(rs[i]), c_top(rs[i+1]))
+    # Retro a análisis
+    arrow(d, (m_left(rs[-1])[0]-2, m_left(rs[-1])[1]), (m_right(r2)[0]+2, m_right(r2)[1]), label="Retroalimentación")
 
     # Cadena NO
     for i in range(len(rn)-1):
-        arrow(d, center_bottom(rn[i]), center_top(rn[i+1]))
-    # Vuelta al análisis
-    arrow(d, (mid_right(rn[-1])[0]+2, mid_right(rn[-1])[1]), (mid_left(r2)[0]-2, mid_left(r2)[1]))
+        arrow(d, c_bottom(rn[i]), c_top(rn[i+1]))
+    arrow(d, (m_right(rn[-1])[0]+2, m_right(rn[-1])[1]), (m_left(r2)[0]-2, m_left(r2)[1]))
 
-    # Hacia FIN (simplificado desde r2)
-    arrow(d, center_bottom(r2), center_top(r_fin))
+    # Hacia FIN
+    arrow(d, c_bottom(r2), c_top(r_fin))
 
-    # Bytes PNG
     out = io.BytesIO()
     img.save(out, format="PNG")
     return out.getvalue()
 
-def build_pdf(png_bytes: bytes) -> bytes:
-    # Coloca el PNG en un A4 apaisado manteniendo márgenes
-    buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=landscape(A4))
-    page_w, page_h = landscape(A4)
-    margin = 24
-    img_buf = io.BytesIO(png_bytes)
-    # dimensionado
-    from PIL import Image as PILImage
-    im = PILImage.open(img_buf)
-    iw, ih = im.size
-    scale = min((page_w-2*margin)/iw, (page_h-2*margin)/ih)
-    w, h = iw*scale, ih*scale
-    x = (page_w - w)/2
-    y = (page_h - h)/2
-    img_buf.seek(0)
-    c.drawImage(ImageReader(img_buf), x, y, width=w, height=h)
-    c.showPage()
-    c.save()
-    return buf.getvalue()
+def make_pdf_from_png(png_bytes: bytes) -> bytes:
+    """
+    Crea un PDF A4 apaisado con el PNG centrado usando solo Pillow.
+    """
+    # A4 300 DPI apaisado: 3508 x 2480 px
+    A4W, A4H = 3508, 2480
+    page = Image.new("RGB", (A4W, A4H), (255, 255, 255))
+    img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
 
-def build_pptx(png_bytes: bytes) -> bytes:
+    # Ajuste manteniendo aspecto
+    scale = min((A4W-200)/img.width, (A4H-200)/img.height)
+    new_size = (int(img.width*scale), int(img.height*scale))
+    img = img.resize(new_size, Image.LANCZOS)
+    x = (A4W - img.width)//2
+    y = (A4H - img.height)//2
+    page.paste(img, (x, y))
+
+    out = io.BytesIO()
+    page.save(out, format="PDF")
+    return out.getvalue()
+
+def make_pptx(png_bytes: bytes) -> bytes:
     prs = Presentation()
     blank = prs.slide_layouts[6]
     slide = prs.slides.add_slide(blank)
-    pic = slide.shapes.add_picture(io.BytesIO(png_bytes), Inches(0.25), Inches(0.25), width=Inches(9.5))
+    slide.shapes.add_picture(io.BytesIO(png_bytes), Inches(0.25), Inches(0.25), width=Inches(9.5))
     out = io.BytesIO()
     prs.save(out)
     return out.getvalue()
 
 # ---------- Generar y mostrar ----------
-from reportlab.lib.utils import ImageReader  # (después de las funciones)
-
 png_bytes = render_png()
-pdf_bytes = build_pdf(png_bytes)
-pptx_bytes = build_pptx(png_bytes)
+pdf_bytes = make_pdf_from_png(png_bytes)
+pptx_bytes = make_pptx(png_bytes)
 
 st.subheader("Vista previa (PNG)")
 st.image(png_bytes, use_column_width=True)
@@ -281,6 +254,6 @@ st.download_button("⬇️ Descargar PDF", data=pdf_bytes, file_name="diagrama_m
 st.download_button("⬇️ Descargar PPTX", data=pptx_bytes, file_name="diagrama_modelo_preventivo.pptx",
                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation")
 
-st.info("Podés editar los textos de cada bloque arriba y volver a descargar los 3 formatos.")
+st.info("Editá los textos y volvés a descargar. No requiere reportlab/cairo/graphviz.")
 
 
