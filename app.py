@@ -1,8 +1,9 @@
 # =========================
-# 📊 Diagrama MPGP – Exportador (Pillow, layout limpio y ajustable)
+# 📊 Diagrama MPGP – Exportador (Pillow, layout limpio y rótulos bien ubicados)
 # =========================
 # - PNG, PDF y PPTX
-# - Flechas con separación de seguridad + rótulos Sí/No fuera
+# - Flechas con separación de seguridad
+# - Rótulos "Sí/No" pegados a la flecha (colocados con normal perpendicular)
 # - Retroalimentación por riel externo (sin cruces)
 # - SÍ 5 redimensionable (alto) + ancho de toda la rama SÍ configurable
 # =========================
@@ -17,7 +18,7 @@ from pptx.util import Inches
 # ---------- Config / Estilos ----------
 st.set_page_config(page_title="Diagrama MPGP – Exportador", layout="wide")
 st.title("Modelo Preventivo de Gestión Policial – Función de Operacionales")
-st.caption("Flechas ordenadas, rótulos fuera, retroalimentación externa y SÍ 5 ajustable. Exporta PNG / PDF / PPTX.")
+st.caption("Flechas ordenadas, rótulos fuera y bien posicionados, retroalimentación externa y SÍ 5 ajustable.")
 
 BLUE=(31,78,121); BORDER=(155,187,217); LIGHTBLUE=(220,235,247); LIGHTYELLOW=(255,248,225)
 WHITE=(255,255,255); BLACK=(0,0,0); BG=(247,250,255)
@@ -108,7 +109,19 @@ def arrow(d: ImageDraw.ImageDraw, p1: Tuple[int,int], p2: Tuple[int,int], color=
     a2=(p2[0]-ARROW_HEAD*math.cos(ang+0.4), p2[1]-ARROW_HEAD*math.sin(ang+0.4))
     d.polygon([p2,a1,a2], fill=color)
 
-def draw_label(d, x, y, text): d.text((x,y), text, font=FONT_SMALL, fill=BLUE, anchor="mm")
+def label_near_segment(d: ImageDraw.ImageDraw, p1, p2, text: str, offset: int = 30):
+    """Coloca el texto a un lado del segmento p1->p2 (usando la normal)."""
+    mx, my = (p1[0]+p2[0])/2, (p1[1]+p2[1])/2
+    dx, dy = p2[0]-p1[0], p2[1]-p1[1]
+    L = max(1.0, math.hypot(dx, dy))
+    nx, ny = -dy/L, dx/L  # normal a la derecha
+    tx, ty = mx + nx*offset, my + ny*offset
+    # fondo blanco para legibilidad
+    w = d.textlength(text, font=FONT_SMALL); h = FONT_SMALL.size
+    pad = 6
+    d.rounded_rectangle([tx-w/2-pad, ty-h/2-pad, tx+w/2+pad, ty+h/2+pad],
+                        radius=8, fill=WHITE, outline=None)
+    d.text((tx, ty), text, font=FONT_SMALL, fill=BLUE, anchor="mm")
 
 def poly_arrow(d: ImageDraw.ImageDraw, pts, color=BLUE, width=4):
     for i in range(len(pts)-2):
@@ -182,11 +195,15 @@ def render_png() -> bytes:
         r=big(lx,int(Ys[i]),widths,h_si)
         rrect(d,r); draw_centered(d,t,r); rn.append(r)
 
-    # Decisión → ramas (rótulos fuera)
-    arrow(d, right_pt(r_dec), (rs[0][0]-HEAD_CLEAR, (rs[0][1]+rs[0][3])//2))
-    arrow(d, left_pt(r_dec),  (rn[0][2]+HEAD_CLEAR, (rn[0][1]+rn[0][3])//2))
-    draw_label(d, right_pt(r_dec)[0]+70, right_pt(r_dec)[1]-40, "Sí")
-    draw_label(d, left_pt(r_dec)[0]-70,  left_pt(r_dec)[1]-40,  "No")
+    # Decisión → ramas (con rótulo pegado a la flecha por perpendicular)
+    p_dec_to_si = (right_pt(r_dec), (rs[0][0]-HEAD_CLEAR, (rs[0][1]+rs[0][3])//2))
+    p_dec_to_no = (left_pt(r_dec),  (rn[0][2]+HEAD_CLEAR, (rn[0][1]+rn[0][3])//2))
+
+    arrow(d, *p_dec_to_si)
+    label_near_segment(d, *p_dec_to_si, "Sí", offset=34)
+
+    arrow(d, *p_dec_to_no)
+    label_near_segment(d, *p_dec_to_no, "No", offset=34)
 
     # Cadenas verticales (punta fuera de la caja destino)
     for i in range(len(rs)-1):
@@ -205,19 +222,15 @@ def render_png() -> bytes:
     mid2  = (rail_x, (r2[1]+r2[3])//2)                  # sube/baja por el riel
     end   = (r2[2]+HEAD_CLEAR, (r2[1]+r2[3])//2)        # entra por la derecha del Bloque 2
     poly_arrow(d, [start, mid1, mid2, end], color=BLUE, width=4)
-    # Etiqueta cerca del riel
     d.text((rail_x-10, (start[1]+mid2[1])//2), "Retroalimentación", font=FONT_SMALL, fill=BLUE, anchor="rm")
 
     # Export PNG bytes
-    out=io.BytesIO()
-    img.save(out, format="PNG")
-    return out.getvalue()
+    out=io.BytesIO(); img.save(out, format="PNG"); return out.getvalue()
 
 # ---------- Exportadores ----------
 def make_pdf_from_png(png_bytes: bytes) -> bytes:
     img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
-    out = io.BytesIO(); img.save(out, format="PDF")  # 1 página
-    return out.getvalue()
+    out = io.BytesIO(); img.save(out, format="PDF"); return out.getvalue()
 
 def make_pptx(png_bytes: bytes) -> bytes:
     prs = Presentation()
@@ -238,6 +251,3 @@ with c1: st.download_button("⬇️ PNG", png_bytes, "diagrama_modelo_preventivo
 with c2: st.download_button("⬇️ PDF", pdf_bytes, "diagrama_modelo_preventivo.pdf", "application/pdf")
 with c3: st.download_button("⬇️ PPTX", pptx_bytes, "diagrama_modelo_preventivo.pptx",
                             "application/vnd.openxmlformats-officedocument.presentationml.presentation")
-
-st.info("Tip: si aún ves flechas cerca de textos, subí el espaciado, mové el inicio de la rama SÍ más arriba o ensanchá los cuadros.")
-
