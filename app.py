@@ -1,20 +1,19 @@
 # ===========================================
 # MPGP – Generador de diagrama (ordenado/resumido)
-# Exporta: PNG / PDF / PPTX
+# Exporta: PNG / PDF  (+ PPTX si está disponible)
 # ===========================================
-import io, math, sys, subprocess
+import io, math
 from typing import List, Tuple
 import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 
-# Autoinstala python-pptx si no está
+# PPTX opcional (no instalar en runtime)
 try:
     from pptx import Presentation
     from pptx.util import Inches
-except ModuleNotFoundError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "python-pptx==0.6.23"])
-    from pptx import Presentation
-    from pptx.util import Inches
+    HAS_PPTX = True
+except Exception:
+    HAS_PPTX = False
 
 # ---------------- Estilos / colores ----------------
 W, H = 2200, 3000            # lienzo grande (imprimible)
@@ -63,11 +62,12 @@ def diamond(d, box, fill=LIGHTY, outline=BLUE, w=3):
     x0,y0,x1,y1=box; cx=(x0+x1)//2; cy=(y0+y1)//2
     d.polygon([(cx,y0),(x1,cy),(cx,y1),(x0,cy)], fill=fill, outline=outline)
 
+import math as _m
 def arrow(d, p1:Tuple[int,int], p2:Tuple[int,int], color=BLUE, w=4):
     d.line([p1,p2], fill=color, width=w)
-    ang=math.atan2(p2[1]-p1[1], p2[0]-p1[0])
-    a1=(p2[0]-ARH*math.cos(ang-0.4), p2[1]-ARH*math.sin(ang-0.4))
-    a2=(p2[0]-ARH*math.cos(ang+0.4), p2[1]-ARH*math.sin(ang+0.4))
+    ang=_m.atan2(p2[1]-p1[1], p2[0]-p1[0])
+    a1=(p2[0]-ARH*_m.cos(ang-0.4), p2[1]-ARH*_m.sin(ang-0.4))
+    a2=(p2[0]-ARH*_m.cos(ang+0.4), p2[1]-ARH*_m.sin(ang+0.4))
     d.polygon([p2,a1,a2], fill=color)
 
 def label(d, mx,my,text):
@@ -169,7 +169,7 @@ def render_png(txt:dict=TXT) -> bytes:
     fin=[cx-300, dec[3]+10+420, cx+300, dec[3]+10+520]
     oval(d,fin); draw_center(d,txt["FIN"],fin,F)
 
-    # NODOS (2 filas x 3)
+    # NODOS (2x3)
     sec_y = dec[3]+10+560
     d.text((W//2, sec_y), "Focalización por Nodos Demandantes – Resumen (Proc. 1.4)", font=font(32), fill=BLUE, anchor="mm")
     y_sup = sec_y+70; x0=200; bw=420; gap=70; bh=100
@@ -219,12 +219,10 @@ def make_pptx(png:bytes)->bytes:
 # ---------------- UI (simple y directa) ----------------
 st.set_page_config(page_title="MPGP – Generador de diagrama", layout="wide")
 st.title("MPGP – Diagrama integrado (generador)")
-st.caption("Hecho, ordenado y resumido. Descarga en PNG / PDF / PPTX.")
+st.caption("Hecho, ordenado y resumido. Descarga en PNG / PDF" + (" / PPTX." if HAS_PPTX else "."))
 
-# Botón Generar
-if st.button("🛠️ Generar/Actualizar diagrama", use_container_width=True):
-    st.session_state.png = render_png()
-if "png" not in st.session_state:
+# Generar al cargar y con botón
+if st.button("🛠️ Generar/Actualizar diagrama", use_container_width=True) or "png" not in st.session_state:
     st.session_state.png = render_png()
 
 # Preview + descargas
@@ -235,7 +233,16 @@ with col1:
 with col2:
     st.download_button("⬇️ PDF", make_pdf(st.session_state.png), "MPGP_integrado.pdf", "application/pdf", use_container_width=True)
 with col3:
-    st.download_button("⬇️ PPTX", make_pptx(st.session_state.png), "MPGP_integrado.pptx",
-                       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                       use_container_width=True)
+    if HAS_PPTX:
+        st.download_button(
+            "⬇️ PPTX",
+            make_pptx(st.session_state.png),
+            "MPGP_integrado.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            use_container_width=True
+        )
+    else:
+        st.info("Para habilitar PPTX agrega 'python-pptx==0.6.23' a requirements.txt y redeploy.")
+
+
 
