@@ -1,215 +1,284 @@
 # =========================
-# 📊 Diagrama MPGP – Exportador (matplotlib, rama "Sí" ajustable)
+# 📊 Diagrama MPGP – Exportador (Pillow)
 # =========================
-# - Controles para: inicio de rama Sí, espaciado y modo compacto
-# - Flecha de retroalimentación curva (evita cruces)
-# - Exporta PNG, PDF y PPTX
+# - Sin matplotlib / sin reportlab / sin cairo / sin graphviz
+# - PNG, PDF y PPTX
+# - Controles: inicio de rama "Sí", espaciado y modo compacto
 # =========================
 
-import io, textwrap
+import io, math, textwrap
 from dataclasses import dataclass
-from typing import Tuple, List
+from typing import List, Tuple
 
 import streamlit as st
-import matplotlib.pyplot as plt
-from matplotlib import patches
+from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
 from pptx.util import Inches
-from PIL import Image
 
-# -------- Estilos --------
-BLUE = "#1F4E79"; BORDER = "#9BBBD9"; LIGHTBLUE = "#DCEBF7"
-LIGHTYELLOW = "#FFF8E1"; BLACK = "#000000"; BG = "#F7FAFF"
-
-# -------- Config --------
+# ---------- Config ----------
 st.set_page_config(page_title="Diagrama MPGP – Exportador", layout="wide")
-st.title("Diagrama de Flujo – Modelo Preventivo de Gestión Policial (layout limpio)")
-st.caption("Rama **Sí** ajustable (inicio + espaciado). Exporta PNG, PDF y PPTX.")
+st.title("Diagrama de Flujo – Modelo Preventivo de Gestión Policial")
+st.caption("Versión sin dependencias nativas. Ajustá la rama **Sí** y exportá en PNG, PDF y PPTX.")
 
-# -------- Entradas --------
+# ---------- Paleta ----------
+BLUE = (31, 78, 121)
+BORDER = (155, 187, 217)
+LIGHTBLUE = (220, 235, 247)
+LIGHTYELLOW = (255, 248, 225)
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+BG = (247, 250, 255)
+
+# ---------- Fuente ----------
+def load_font(size=20):
+    try:
+        return ImageFont.truetype("DejaVuSans.ttf", size)
+    except Exception:
+        return ImageFont.load_default()
+
+FONT = load_font(22)
+FONT_SMALL = load_font(18)
+FONT_TITLE = load_font(28)
+
+# ---------- Entradas ----------
 colA, colB = st.columns(2)
 with colA:
     t_inicio = st.text_input("INICIO", "Planificación preventiva anual")
-    b1 = st.text_area("Bloque 1", "Definición y calendarización de Delegaciones\n(Procedimiento 1.1 MPGP)", height=72)
-    b2 = st.text_area("Bloque 2", "Apreciación situacional del territorio\n(Procedimiento 1.2)", height=72)
-    b3 = st.text_area("Bloque 3", "Identificación de factores de riesgo y delitos\n(DATAPOL, estadísticas, patrullaje)", height=72)
+    b1 = st.text_area("Bloque 1", "Definición y calendarización de Delegaciones\n(Procedimiento 1.1 MPGP)")
+    b2 = st.text_area("Bloque 2", "Apreciación situacional del territorio\n(Procedimiento 1.2)")
+    b3 = st.text_area("Bloque 3", "Identificación de factores de riesgo y delitos\n(DATAPOL, estadísticas, patrullaje)")
     q_dec = st.text_input("Decisión", "¿Se identifican riesgos prioritarios?")
 with colB:
-    s1 = st.text_area("SÍ 1", "Priorización de riesgos y delitos\n(Pareto, MIC-MAC, Triángulo de violencias)", height=72)
-    s2 = st.text_area("SÍ 2", "Construcción de líneas de acción preventivas\n(Procedimiento 2.3)", height=72)
-    s3 = st.text_area("SÍ 3", "Planificación de programas policiales preventivos\n(Procedimiento 2.4)", height=72)
-    s4 = st.text_area("SÍ 4", "Elaboración de órdenes de servicio para operativos", height=72)
-    s5 = st.text_area("SÍ 5", "Implementación en terreno\n• Patrullajes preventivos\n• Respuesta inmediata\n• Supervisión\n• Coordinación local", height=96)
-    s6 = st.text_area("SÍ 6", "Reporte de operativos (RAP, DATAPOL, informes)", height=72)
-    s7 = st.text_area("SÍ 7", "Evaluación de cumplimiento (Trazabilidad 3.1 y 3.2)", height=72)
-    s8 = st.text_area("SÍ 8", "Retroalimentación a la planificación preventiva", height=72)
+    s1 = st.text_area("SÍ 1", "Priorización de riesgos y delitos\n(Pareto, MIC-MAC, Triángulo de violencias)")
+    s2 = st.text_area("SÍ 2", "Construcción de líneas de acción preventivas\n(Procedimiento 2.3)")
+    s3 = st.text_area("SÍ 3", "Planificación de programas policiales preventivos\n(Procedimiento 2.4)")
+    s4 = st.text_area("SÍ 4", "Elaboración de órdenes de servicio para operativos")
+    s5 = st.text_area("SÍ 5", "Implementación en terreno\n• Patrullajes preventivos\n• Respuesta inmediata\n• Supervisión\n• Coordinación local")
+    s6 = st.text_area("SÍ 6", "Reporte de operativos (RAP, DATAPOL, informes)")
+    s7 = st.text_area("SÍ 7", "Evaluación de cumplimiento (Trazabilidad 3.1 y 3.2)")
+    s8 = st.text_area("SÍ 8", "Retroalimentación a la planificación preventiva")
 
 colC, colD = st.columns(2)
 with colC:
-    n1 = st.text_area("NO 1", "Patrullaje rutinario y vigilancia continua", height=72)
-    n2 = st.text_area("NO 2", "Registro de factores menores en RAP", height=72)
-    n3 = st.text_area("NO 3", "Integración al análisis situacional", height=72)
+    n1 = st.text_area("NO 1", "Patrullaje rutinario y vigilancia continua")
+    n2 = st.text_area("NO 2", "Registro de factores menores en RAP")
+    n3 = st.text_area("NO 3", "Integración al análisis situacional")
 with colD:
-    t_fin = st.text_area("FIN", "Evaluación global de resultados\n(Indicadores, metas, impacto – 3.3)", height=72)
+    t_fin = st.text_area("FIN", "Evaluación global de resultados\n(Indicadores, metas, impacto – 3.3)")
 
 st.markdown("### ⚙️ Ajustes de layout (rama **Sí**)")
-colS1, colS2, colS3 = st.columns(3)
-with colS1:
-    # Valor alto = más arriba (y en esta figura el eje Y crece hacia arriba)
-    start_si = st.slider("Inicio rama SÍ (más arriba ⇡)", min_value=80, max_value=140, value=100, step=2)
-with colS2:
-    espaciado_deseado = st.slider("Espaciado vertical deseado", min_value=6, max_value=16, value=10, step=1)
-with colS3:
-    compacto = st.toggle("Modo compacto (alturas reducidas)", value=True)
+c1, c2, c3 = st.columns(3)
+with c1:
+    # Desplazamiento relativo desde la decisión: negativo = más arriba
+    start_offset = st.slider("Inicio rama SÍ (relativo a la decisión)", -220, 140, -60, 5)
+with c2:
+    step_user = st.slider("Espaciado vertical entre cuadros (px)", 80, 160, 110, 5)
+with c3:
+    compacto = st.toggle("Modo compacto (cuadros más bajos)", value=True)
 
-# -------- Utilidades de dibujo --------
-@dataclass
-class Node:
-    x: float; y: float; w: float; h: float; text: str; shape: str; fc: str; ec: str = BLUE
+# ---------- Motor de dibujo ----------
+W, H = 2000, 1400  # lienzo
+IMG_BG = BG
 
-def wrap(txt: str, max_chars: int) -> str:
-    parts = []
-    for block in txt.split("\n"):
-        parts.append(textwrap.fill(block, width=max_chars))
-    return "\n".join(parts)
+def wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_w: int) -> List[str]:
+    lines = []
+    for raw in text.split("\n"):
+        for ln in textwrap.wrap(raw, width=100):
+            # re-wrap por ancho real
+            words, line = ln.split(" "), ""
+            for w in words:
+                t = (line + " " + w).strip()
+                if draw.textlength(t, font=font) <= max_w:
+                    line = t
+                else:
+                    if line: lines.append(line)
+                    line = w
+            if line: lines.append(line)
+    return lines
 
-def draw_node(ax, n: Node, fontsize=9):
-    if n.shape == "rect":
-        ax.add_patch(patches.FancyBboxPatch(
-            (n.x - n.w/2, n.y - n.h/2), n.w, n.h,
-            boxstyle="round,pad=0.02,rounding_size=6",
-            linewidth=1.8, edgecolor=n.ec, facecolor=n.fc
-        ))
-    elif n.shape == "oval":
-        ax.add_patch(patches.Ellipse((n.x, n.y), n.w, n.h, linewidth=1.8, edgecolor=n.ec, facecolor=n.fc))
-    elif n.shape == "diamond":
-        vx = [(n.x, n.y + n.h/2), (n.x + n.w/2, n.y), (n.x, n.y - n.h/2), (n.x - n.w/2, n.y)]
-        ax.add_patch(patches.Polygon(vx, closed=True, linewidth=1.8, edgecolor=n.ec, facecolor=n.fc))
-    ax.text(n.x, n.y, wrap(n.text, max_chars=int(n.w/6.5)), ha="center", va="center", fontsize=9, color=BLACK)
+def draw_centered_multiline(draw: ImageDraw.ImageDraw, text: str, box, font=FONT, fill=BLACK, leading=6):
+    x0, y0, x1, y1 = box
+    max_w = x1 - x0 - 24
+    lines = wrap_text(draw, text, font, max_w)
+    line_h = font.size + leading
+    total_h = len(lines) * line_h
+    y = y0 + (y1 - y0 - total_h) // 2
+    for ln in lines:
+        w = draw.textlength(ln, font=font)
+        x = x0 + (x1 - x0 - w) // 2
+        draw.text((x, y), ln, font=font, fill=fill)
+        y += line_h
 
-def arrow(ax, p1: Tuple[float,float], p2: Tuple[float,float], label: str = "", curve: float = 0.0, color: str = BLUE):
-    style = f"arc3,rad={curve}" if curve != 0 else "arc3"
-    ax.add_patch(patches.FancyArrowPatch(p1, p2, connectionstyle=style,
-                                         arrowstyle="-|>", mutation_scale=12,
-                                         linewidth=1.6, color=color))
+def rounded_rect(draw: ImageDraw.ImageDraw, box, radius=22, fill=WHITE, outline=BLUE, width=3):
+    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
+
+def oval(draw: ImageDraw.ImageDraw, box, fill=LIGHTBLUE, outline=BLUE, width=3):
+    draw.ellipse(box, fill=fill, outline=outline, width=width)
+
+def diamond(draw: ImageDraw.ImageDraw, box, fill=LIGHTYELLOW, outline=BLUE, width=3):
+    x0, y0, x1, y1 = box
+    cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+    pts = [(cx, y0), (x1, cy), (cx, y1), (x0, cy)]
+    draw.polygon(pts, fill=fill, outline=outline)
+
+def arrow(draw: ImageDraw.ImageDraw, p1, p2, color=BLUE, width=4, label:str=""):
+    draw.line([p1, p2], fill=color, width=width)
+    ang = math.atan2(p2[1]-p1[1], p2[0]-p1[0]); L = 18
+    a1 = (p2[0] - L*math.cos(ang - 0.4), p2[1] - L*math.sin(ang - 0.4))
+    a2 = (p2[0] - L*math.cos(ang + 0.4), p2[1] - L*math.sin(ang + 0.4))
+    draw.polygon([p2, a1, a2], fill=color)
     if label:
-        mx, my = (p1[0]+p2[0])/2, (p1[1]+p2[1])/2
-        ax.text(mx, my + 2, label, color=color, fontsize=9, ha="center")
+        mx, my = (p1[0]+p2[0])//2, (p1[1]+p2[1])//2 - 16
+        draw.text((mx, my), label, font=FONT_SMALL, fill=color, anchor="mm")
 
-# -------- Dibujo principal --------
-def draw_diagram() -> bytes:
-    # Lienzo “lógico”: ancho=200, alto=170
-    W, H = 200, 170
-    fig, ax = plt.subplots(figsize=(14, 10), dpi=200)
-    ax.set_xlim(0, W); ax.set_ylim(0, H); ax.axis("off")
-    fig.patch.set_facecolor(BG); ax.set_facecolor(BG)
+def quad_curve_points(p0, p1, p2, steps=40):
+    pts = []
+    for i in range(steps+1):
+        t = i/steps
+        x = (1-t)**2*p0[0] + 2*(1-t)*t*p1[0] + t**2*p2[0]
+        y = (1-t)**2*p0[1] + 2*(1-t)*t*p1[1] + t**2*p2[1]
+        pts.append((x,y))
+    return pts
 
-    # Columnas (x): izquierda / centro / derecha
-    X_L, X_C, X_R = 50, 100, 150
+def curved_arrow(draw: ImageDraw.ImageDraw, p1, p2, curve=0.25, color=BLUE, width=4, label:str=""):
+    # Control point: perpendicular al segmento p1->p2
+    mx, my = (p1[0]+p2[0])/2, (p1[1]+p2[1])/2
+    dx, dy = p2[0]-p1[0], p2[1]-p1[1]
+    L = math.hypot(dx, dy) or 1.0
+    nx, ny = -dy/L, dx/L  # normal
+    ctrl = (mx + curve*L*0.5*nx, my + curve*L*0.5*ny)
 
-    # Columna central (y)
-    Yc = {"inicio":150, "b1":132, "b2":114, "b3":96, "dec":78, "fin":22}
+    pts = quad_curve_points(p1, ctrl, p2, steps=50)
+    draw.line(pts, fill=color, width=width)
 
-    # Nodos centrales
-    nodes = [
-        Node(X_C, Yc["inicio"], 60, 16, f"INICIO\n{t_inicio}", "oval", LIGHTBLUE),
-        Node(X_C, Yc["b1"], 64, 14, b1, "rect", "#FFFFFF"),
-        Node(X_C, Yc["b2"], 64, 14, b2, "rect", "#FFFFFF"),
-        Node(X_C, Yc["b3"], 64, 14, b3, "rect", "#FFFFFF"),
-        Node(X_C, Yc["dec"], 44, 16, q_dec, "diamond", LIGHTYELLOW),
-        Node(X_C, Yc["fin"], 66, 16, f"FIN\n{t_fin}", "oval", LIGHTBLUE),
-    ]
-    n_inicio, n_b1, n_b2, n_b3, n_dec, n_fin = nodes
+    # Cabeza de flecha en el último tramo
+    x1,y1 = pts[-2]; x2,y2 = pts[-1]
+    ang = math.atan2(y2-y1, x2-x1); Lh = 18
+    a1 = (x2 - Lh*math.cos(ang - 0.4), y2 - Lh*math.sin(ang - 0.4))
+    a2 = (x2 - Lh*math.cos(ang + 0.4), y2 - Lh*math.sin(ang + 0.4))
+    draw.polygon([(x2,y2), a1, a2], fill=color)
 
-    # ------ Rama SÍ (ajustable) ------
-    n_items = 8
-    bottom_safe = 34   # no bajar de acá para no chocar con FIN
-    # Calcula espaciado efectivo para que todo quepa desde start_si hasta bottom_safe
-    espaciado_maximo = max(6.0, (start_si - bottom_safe) / (n_items - 1))
-    step = min(espaciado_deseado, espaciado_maximo)
+    if label:
+        draw.text((mx, my-16), label, font=FONT_SMALL, fill=color, anchor="mm")
 
-    # Altura de cajas (más baja en compacto)
-    h_si = 12 if compacto else 14
-    h_si5 = h_si + 2
+def render_png() -> bytes:
+    img = Image.new("RGB", (W, H), IMG_BG)
+    d = ImageDraw.Draw(img)
 
-    Ys = [start_si - i*step for i in range(n_items)]
-    Stexts = [s1, s2, s3, s4, s5, s6, s7, s8]
-    Snodes = []
-    for i, y in enumerate(Ys):
-        h = h_si5 if i == 4 else h_si
-        Snodes.append(Node(X_R, y, 74, h, Stexts[i], "rect", "#FFFFFF"))
-    nodes += Snodes
+    # Marco y título
+    d.rectangle([20, 20, W-20, H-20], outline=BORDER, width=3)
+    d.text((W//2, 50), "Modelo Preventivo de Gestión Policial – Función de Operacionales",
+           font=FONT_TITLE, fill=BLUE, anchor="mm")
 
-    # ------ Rama NO (alineada con los 3 primeros SÍ) ------
-    Ntexts = [n1, n2, n3]
-    Nnodes = [Node(X_L, Ys[i], 74, h_si, Ntexts[i], "rect", "#FFFFFF") for i in range(3)]
-    nodes += Nnodes
+    # -------- Columna central (coordenadas fijas) --------
+    cx = W//2
+    vgap = 130
+    bw, bh = 440, 100
+    y0 = 120
 
-    # Dibuja nodos
-    for nd in nodes:
-        draw_node(ax, nd)
+    def rect_box(x,y,w=bw,h=bh): return [x-w//2, y-h//2, x+w//2, y+h//2]
+    def big_box(x,y,w,h): return [x-w//2, y-h//2, x+w//2, y+h//2]
 
-    # Helpers
-    def top(n: Node): return (n.x, n.y + n.h/2)
-    def bottom(n: Node): return (n.x, n.y - n.h/2)
-    def left(n: Node): return (n.x - n.w/2, n.y)
-    def right(n: Node): return (n.x + n.w/2, n.y)
+    r_inicio = rect_box(cx, y0)
+    oval(d, r_inicio, fill=LIGHTBLUE, outline=BLUE)
+    draw_centered_multiline(d, f"INICIO\n{t_inicio}", r_inicio)
+
+    r1 = rect_box(cx, y0+vgap);            rounded_rect(d, r1); draw_centered_multiline(d, b1, r1)
+    r2 = rect_box(cx, y0+vgap*2);          rounded_rect(d, r2); draw_centered_multiline(d, b2, r2)
+    r3 = rect_box(cx, y0+vgap*3);          rounded_rect(d, r3); draw_centered_multiline(d, b3, r3)
+    r_dec = big_box(cx, y0+vgap*4, 480, 120); diamond(d, r_dec, fill=LIGHTYELLOW, outline=BLUE); draw_centered_multiline(d, q_dec, r_dec)
+    r_fin = big_box(cx, y0+vgap*8+60, 520, 120); oval(d, r_fin, fill=LIGHTBLUE, outline=BLUE); draw_centered_multiline(d, f"FIN\n{t_fin}", r_fin)
+
+    # Helpers de puntos
+    def c_bottom(r): return ((r[0]+r[2])//2, r[3])
+    def c_top(r):    return ((r[0]+r[2])//2, r[1])
+    def m_left(r):   return (r[0], (r[1]+r[3])//2)
+    def m_right(r):  return (r[2], (r[1]+r[3])//2)
 
     # Flechas columna central
-    arrow(ax, bottom(n_inicio), top(n_b1))
-    arrow(ax, bottom(n_b1), top(n_b2))
-    arrow(ax, bottom(n_b2), top(n_b3))
-    arrow(ax, bottom(n_b3), top(n_dec))
+    arrow(d, c_bottom(r_inicio), c_top(r1))
+    arrow(d, c_bottom(r1), c_top(r2))
+    arrow(d, c_bottom(r2), c_top(r3))
+    arrow(d, c_bottom(r3), c_top(r_dec))
+
+    # -------- Rama SÍ (ajustable) --------
+    rx = cx + 520
+    n_items = 8
+    # y de arranque: centro de la decisión + offset del usuario
+    start_y = (r_dec[1]+r_dec[3])//2 + start_offset
+    # límite inferior seguro (antes del FIN)
+    safe_bottom = r_fin[1] - 140
+    # espaciado efectivo para que quepa todo
+    max_step = max(80, (safe_bottom - start_y) / max(1, (n_items-1)))
+    step = min(step_user, max_step)
+
+    h_si = 90 if compacto else 100
+    h_si5 = h_si + (0 if compacto else 10)
+
+    Ys = [start_y + i*step for i in range(n_items)]
+    texts_si = [s1, s2, s3, s4, s5, s6, s7, s8]
+    rs = []
+    for i, (txt, y) in enumerate(zip(texts_si, Ys)):
+        h = h_si5 if i == 4 else h_si
+        rect_i = big_box(rx, int(y), 520, h)
+        rounded_rect(d, rect_i); draw_centered_multiline(d, txt, rect_i); rs.append(rect_i)
+
+    # -------- Rama NO (alineada con los 3 primeros SÍ) --------
+    lx = cx - 520
+    texts_no = [n1, n2, n3]
+    rn = []
+    for i, txt in enumerate(texts_no):
+        rect_i = big_box(lx, int(Ys[i]), 520, h_si)
+        rounded_rect(d, rect_i); draw_centered_multiline(d, txt, rect_i); rn.append(rect_i)
 
     # Decisión → ramas
-    arrow(ax, right(n_dec), left(Snodes[0]), label="Sí")
-    arrow(ax, left(n_dec), right(Nnodes[0]), label="No")
+    arrow(d, (m_right(r_dec)[0]+10, m_right(r_dec)[1]),
+             (m_left(rs[0])[0]-10,  m_left(rs[0])[1]), label="Sí")
+    arrow(d, (m_left(r_dec)[0]-10,  m_left(r_dec)[1]),
+             (m_right(rn[0])[0]+10, m_right(rn[0])[1]), label="No")
 
-    # Cadenas
-    for a, b in zip(Snodes[:-1], Snodes[1:]): arrow(ax, bottom(a), top(b))
-    for a, b in zip(Nnodes[:-1], Nnodes[1:]): arrow(ax, bottom(a), top(b))
+    # Cadena SÍ
+    for i in range(len(rs)-1):
+        arrow(d, c_bottom(rs[i]), c_top(rs[i+1]))
 
-    # Retroalimentación (curva, último SÍ → Bloque 2)
-    arrow(ax, left(Snodes[-1]), right(n_b2), label="Retroalimentación", curve=0.25)
+    # Cadena NO
+    for i in range(len(rn)-1):
+        arrow(d, c_bottom(rn[i]), c_top(rn[i+1]))
 
-    # Cierre hacia FIN (Bloque 2 → FIN)
-    arrow(ax, bottom(n_b2), top(n_fin))
+    # Retroalimentación (curva) último SÍ → Bloque 2
+    curved_arrow(d, (m_left(rs[-1])[0]-4, m_left(rs[-1])[1]),
+                    (m_right(r2)[0]+4,    m_right(r2)[1]),
+                    curve=-0.35, color=BLUE, label="Retroalimentación")
 
-    # Título y marco
-    ax.text(100, 164, "Modelo Preventivo de Gestión Policial – Función de Operacionales",
-            ha="center", va="center", fontsize=12, color=BLUE, weight="bold")
-    ax.add_patch(patches.Rectangle((3, 3), 200-6, 170-8, fill=False, linewidth=1.5, edgecolor=BORDER))
+    # Hacia FIN (Bloque 2 → FIN)
+    arrow(d, c_bottom(r2), c_top(r_fin))
 
-    # Export PNG bytes
-    buf = io.BytesIO()
-    plt.tight_layout()
-    fig.savefig(buf, format="png", dpi=220)
-    plt.close(fig)
-    return buf.getvalue()
+    # PNG bytes
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
 
-# -------- Exportadores --------
-def make_pdf(png_bytes: bytes) -> bytes:
+# ---------- Exportadores ----------
+def make_pdf_from_png(png_bytes: bytes) -> bytes:
     img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
     out = io.BytesIO(); img.save(out, format="PDF"); return out.getvalue()
 
 def make_pptx(png_bytes: bytes) -> bytes:
     prs = Presentation(); slide = prs.slides.add_slide(prs.slide_layouts[6])
-    slide.shapes.add_picture(io.BytesIO(png_bytes), Inches(0.2), Inches(0.2), width=Inches(9.6))
+    slide.shapes.add_picture(io.BytesIO(png_bytes), Inches(0.25), Inches(0.25), width=Inches(9.6))
     out = io.BytesIO(); prs.save(out); return out.getvalue()
 
-# -------- Render & Descargas --------
-png_bytes = draw_diagram()
-pdf_bytes = make_pdf(png_bytes)
+# ---------- Render & Descargas ----------
+png_bytes = render_png()
+pdf_bytes = make_pdf_from_png(png_bytes)
 pptx_bytes = make_pptx(png_bytes)
 
 st.subheader("Vista previa")
 st.image(png_bytes, use_column_width=True)
-
 c1, c2, c3 = st.columns(3)
 with c1: st.download_button("⬇️ PNG", png_bytes, "diagrama_modelo_preventivo.png", "image/png")
 with c2: st.download_button("⬇️ PDF", pdf_bytes, "diagrama_modelo_preventivo.pdf", "application/pdf")
 with c3: st.download_button("⬇️ PPTX", pptx_bytes, "diagrama_modelo_preventivo.pptx",
                             "application/vnd.openxmlformats-officedocument.presentationml.presentation")
 
-st.info("Si aún no cabe: subí el **Inicio rama SÍ** y/o activa **Modo compacto**.")
-
+st.info("Si aún no cabe: poné un **offset** más negativo (sube la rama SÍ), baja el **espaciado** o activa **modo compacto**.")
